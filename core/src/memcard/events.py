@@ -1,7 +1,9 @@
 """Progress and results, as human text or as NDJSON for the UIs.
 
-With ``--json`` every event is one JSON object per line on stdout:
-{"event": "<type>", ...fields}. Both UIs consume only this stream.
+With ``--json`` every line on stdout is one JSON object, {"event": "<type>",
+...fields}. Every command ends with {"event": "result", "data": ...} on
+success or {"event": "error", "error": {...}} on failure. Both UIs consume
+only this stream.
 """
 
 from __future__ import annotations

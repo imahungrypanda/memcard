@@ -13,6 +13,7 @@ interrupted sync is finished by simply running sync again:
 from __future__ import annotations
 
 import fcntl
+import json
 import logging
 import re
 import shutil
@@ -30,7 +31,7 @@ from .config import Config, Group
 from .errors import AuthError, LocalChanged, LocalPathMissing, MemcardError, Offline, RemoteChanged, Unreachable
 from .events import Events, Silent
 from .model import FileEntry, GroupPlan, Manifest, Resolution, Snapshot, UnitPlan, utcnow
-from .paths import Dirs
+from .paths import Dirs, atomic_write
 from .store import snapshot as snapshots
 from .store.remote import RemoteStore
 from .store.trash import Trash
@@ -149,7 +150,19 @@ class Engine:
                         break
                 results.append(r)
                 self._emit_result(r)
+            self._record_pending(results)
         return results
+
+    def _record_pending(self, results: list[GroupResult]) -> None:
+        """Keep a list of groups with undecided conflicts, for UIs and `memcard status`."""
+        path = self.dirs.state / "pending.json"
+        pending = json.loads(path.read_text()) if path.exists() else {}
+        for r in results:
+            if r.status == "conflicts":
+                pending[r.group] = {"since": pending.get(r.group, {}).get("since", utcnow()), "units": [u.key for u in r.conflicts]}
+            elif r.status == "ok":
+                pending.pop(r.group, None)
+        atomic_write(path, json.dumps(pending, indent=1).encode())
 
     def _emit_result(self, r: GroupResult) -> None:
         if r.error:
