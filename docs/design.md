@@ -1,6 +1,6 @@
 # Memcard — design proposal
 
-Status: **proposal, awaiting approval.** No implementation code until this is signed off.
+Status: **approved 2026-10-17** with the recommended answers to D1–D4. memcard-core is built; §8 lists where the build differs from this proposal.
 
 Covers the three things the build prompt asks for first: repo layout, state/manifest
 format, and core module boundaries. It also records the decisions that fall out of
@@ -90,23 +90,23 @@ launch_timeout_s = 20        # pull gives up and launches with local saves after
 [[group]]
 id    = "retroarch"
 label = "RetroArch (all systems)"
-paths = ["/run/media/deck/FATTY/Emulation/saves/retroarch/saves"]
+path  = "/run/media/deck/FATTY/Emulation/saves/retroarch/saves"
 unit  = "file"               # each .srm resolves independently (see 2.5)
-include = ["**/*.srm", "**/*.sav", "**/*.rtc"]
+include = ["*.srm", "*.sav", "*.rtc"]   # no "/" = match the file name at any depth
 emulator = "org.libretro.RetroArch"   # flatpak id, used to wait for full exit
 appids = []                  # empty = manual/periodic only; still fully syncable
 
 [[group]]
 id    = "dolphin-gc"
 label = "Dolphin GameCube memory cards"
-paths = ["/run/media/deck/FATTY/Emulation/saves/dolphin/GC"]
+path  = "/run/media/deck/FATTY/Emulation/saves/dolphin/GC"
 unit  = "group"              # all files move together
 emulator = "org.DolphinEmu.dolphin-emu"
 appids = [3141592653, 2718281828]
 
 [[group]]
 id    = "pokemon-firered"    # per-game group carved out of "retroarch"
-paths = ["/run/media/deck/FATTY/Emulation/saves/retroarch/saves/Pokemon FireRed Version.srm"]
+file  = "/run/media/deck/FATTY/Emulation/saves/retroarch/saves/Pokemon FireRed Version.srm"
 unit  = "group"
 emulator = "org.libretro.RetroArch"
 appids = [3141592653]
@@ -385,3 +385,22 @@ snapshot on the remote would only add "which machines are behind" reporting; I'd
 - macOS `/usr/bin/rsync` is openrsync, not GNU rsync; integration tests need
   `brew install rsync rclone`. Linux CI is the source of truth.
 - Target Python 3.11 (SteamOS system python and Decky's bundled runtime).
+
+---
+
+## 8. Changes made while building memcard-core
+
+| Proposal | As built | Why |
+|---|---|---|
+| `paths = [...]` per group | `path = "<dir>"` **or** `file = "<one save>"` | One root per group keeps relative paths unambiguous across machines. Use two groups for two folders. |
+| `unit = "dir"` = "each directory" | Each **top-level entry** (file or folder) is a unit | Handles PCSX2, which mixes single-file and folder memory cards |
+| Restore relies on `--keep-dirlinks` | Also resolves symlinks itself and gives rsync a symlink-free destination | rsync ≥ 3.4 (the CVE-2024-12084 hardening) refuses to traverse a symlinked dir when creating parent dirs, even with `--keep-dirlinks`. Found by the integration tests. |
+| Pre-launch = pull, post-exit = push | Both are a full two-way sync; the planner picks the direction | One code path. A push left pending from an offline session goes up before launch, and conflicts are still caught. |
+| `--appid N` required | Defaults to the appid Steam passes in `SteamGameId` | The launch option is the same text for every game |
+| (new) | **Mass-delete guard:** if one side has lost *every* file the snapshot knew, those units become conflicts | An unmounted SD card or a reset remote folder must never propagate as "delete everything" |
+| `rclone config create` | Setup writes Memcard's own `rclone.conf` directly (0600), with passwords obscured via `rclone obscure -` on stdin | Keeps secrets off the command line, where `ps` would show them. Remotes in the user's own rclone.conf are reused, never edited. |
+| NDJSON events | Every `--json` line is `{"event": …}`; each command ends with `result` or `error` | One shape for the UIs to parse |
+| (new) | `state/pending.json` lists groups with undecided conflicts | Game Mode syncs leave conflicts for later; UIs and `status` need to know |
+| (new) | GC skips unreferenced objects younger than a day | Another machine's in-flight push may be about to commit them |
+| Config editing via tomlkit | Reading is stdlib `tomllib`; tomlkit is imported only when writing | Hot paths (`wrap`, `sync`) stay stdlib-only |
+| (new) | Ships as one ~100 KB zipapp (`scripts/build-zipapp.sh`) | Nothing to install on an immutable OS |
