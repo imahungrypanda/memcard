@@ -72,7 +72,7 @@ class RemoteConfig:
 
     @property
     def spec(self) -> str:
-        return f"{self.name}:{self.folder.strip('/')}"
+        return f"{self.name}:{self.folder.rstrip('/')}"
 
 
 @dataclass

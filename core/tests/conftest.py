@@ -11,3 +11,10 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "integration" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def isolated(tmp_path, monkeypatch):
+    """Run every test in a temp cwd with its own MEMCARD_HOME, so nothing can leak into the repo or ~."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MEMCARD_HOME", str(tmp_path / "memcard-home"))

@@ -99,5 +99,5 @@ def test_writers_preserve_comments(tmp_path):
     assert cfg.remote.spec == "nextcloud:memcard"
     assert cfg.group("ppsspp").appids == [3, 7]
     config.set_remote(p, "other", "/saves/")
-    assert config.load(p).remote.spec == "other:saves"
+    assert config.load(p).remote.spec == "other:/saves"
     assert "provider" not in tomllib.loads(p.read_text())["remote"]
