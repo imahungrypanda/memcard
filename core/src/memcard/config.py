@@ -207,8 +207,8 @@ def load(path: Path) -> Config:
 
     s = raw.get("sync", {})
     sync = SyncConfig(**{k: int(v) for k, v in s.items() if k in SyncConfig.__dataclass_fields__})
-    if sync.trash_versions < 1:
-        raise ConfigError("[sync] trash_versions must be at least 1.")
+    if sync.trash_versions < 1 or sync.history_versions < 1:
+        raise ConfigError("[sync] trash_versions and history_versions must be at least 1.")
 
     groups = [_parse_group(g, i) for i, g in enumerate(raw.get("group", []))]
     seen: set[str] = set()
