@@ -1,0 +1,20 @@
+{
+ "format": 1,
+ "group": "ra",
+ "generation": 1,
+ "parent": null,
+ "committed_at": "2026-10-17T21:08:01Z",
+ "committed_by": "id-Deck",
+ "machines": {
+  "id-Deck": "Deck"
+ },
+ "files": {
+  "s.srm": {
+   "sha256": "cae662172fd450bb0cd710a769079c05bfc5d8e35efa6576edc7d0377afdd4a2",
+   "size": 4,
+   "mtime": "2026-10-17T21:08:01Z",
+   "written_by": "id-Deck",
+   "written_at": "2026-10-17T21:08:01Z"
+  }
+ }
+}

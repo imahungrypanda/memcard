@@ -1,0 +1,27 @@
+{
+ "format": 1,
+ "group": "ra",
+ "generation": 1,
+ "parent": null,
+ "committed_at": "2026-10-17T21:08:04Z",
+ "committed_by": "id-Deck",
+ "machines": {
+  "id-Deck": "Deck"
+ },
+ "files": {
+  "A.srm": {
+   "sha256": "4e1195df020de59e0d65a33a4279f1183e7ae4e5d980e309f8b55adff2e61c3e",
+   "size": 2,
+   "mtime": "2026-10-17T21:08:04Z",
+   "written_by": "id-Deck",
+   "written_at": "2026-10-17T21:08:04Z"
+  },
+  "B.srm": {
+   "sha256": "c02c0b965e023abee808f2b548d8d5193a8b5229be6f3121a6f16e2d41a449b3",
+   "size": 2,
+   "mtime": "2026-10-17T21:08:04Z",
+   "written_by": "id-Deck",
+   "written_at": "2026-10-17T21:08:04Z"
+  }
+ }
+}

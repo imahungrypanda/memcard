@@ -1,0 +1,28 @@
+{
+ "format": 1,
+ "group": "ra",
+ "generation": 2,
+ "parent": 1,
+ "committed_at": "2026-10-17T21:08:27Z",
+ "committed_by": "id-PC",
+ "machines": {
+  "id-Deck": "Deck",
+  "id-PC": "PC"
+ },
+ "files": {
+  "a.srm": {
+   "sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+   "size": 1,
+   "mtime": "2026-10-17T21:08:27Z",
+   "written_by": "id-Deck",
+   "written_at": "2026-10-17T21:08:27Z"
+  },
+  "b.srm": {
+   "sha256": "08e9679187c653aacae5d05f5e9d67c09b4ab8827914b2102ca2688368136a48",
+   "size": 4,
+   "mtime": "2026-10-17T21:08:27Z",
+   "written_by": "id-PC",
+   "written_at": "2026-10-17T21:08:27Z"
+  }
+ }
+}
