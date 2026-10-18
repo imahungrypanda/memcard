@@ -250,3 +250,62 @@ def test_skipping_the_prelaunch_sync_still_pushes_after_the_game(machine, monkey
     d = Dirs.resolve()
     head = engine.Engine(config.load(d.config_file), d).store.head("retroarch")
     assert head.files["fr.srm"].size == len(b"v2-played")
+
+
+# --- hooks for UIs that control the launch themselves (the Decky plugin) -------
+
+
+def test_groups_lists_mapping_without_network(machine, capsys):
+    capsys.readouterr()
+    assert run("--json", "groups") == 0
+    data = result(events(capsys))
+    assert data["machine"]["name"] == "Deck"
+    assert data["remote"]["spec"].startswith("cloud:")
+    assert data["groups"][0]["id"] == "retroarch" and data["groups"][0]["appids"] == [4242]
+    assert data["pending"] == {}
+
+
+def test_before_launch_then_after_exit(machine, capsys, monkeypatch):
+    from memcard import config, triggers
+    from memcard.engine import Engine
+
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    d = Dirs.resolve()
+    (machine / "fr.srm").write_bytes(b"before")
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "4242", "--before-launch") == 0
+    data = result(events(capsys))
+    assert data["mapped"] and data["results"][0]["pushed"] == ["fr.srm"]
+    assert (d.running / "app-4242").exists()
+    assert triggers.game_running(config.load(d.config_file), d), "background sync must back off while it plays"
+
+    (machine / "fr.srm").write_bytes(b"played!")  # the game saves
+    assert run("--json", "sync", "--appid", "4242", "--after-exit") == 0
+    evts = events(capsys)
+    assert any(e["event"] == "postexit" for e in evts)
+    assert result(evts)["results"][0]["pushed"] == ["fr.srm"]
+    assert not (d.running / "app-4242").exists()
+    head = Engine(config.load(d.config_file), d).store.head("retroarch")
+    assert head.files["fr.srm"].size == len(b"played!")
+
+
+def test_unmapped_appid_is_a_quiet_no_op(machine, capsys):
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "1", "--before-launch") == 0
+    data = result(events(capsys))
+    assert data == {"results": [], "appid": 1, "mapped": False}
+    assert run("--json", "sync", "--appid", "1", "--after-exit") == 0
+    assert not (Dirs.resolve().running / "app-1").exists()
+
+
+def test_launch_hooks_need_an_appid(machine):
+    assert run("sync", "--before-launch") == 4
+
+
+def test_status_by_appid(machine, capsys):
+    (machine / "fr.srm").write_bytes(b"x")
+    capsys.readouterr()
+    assert run("--json", "status", "--appid", "4242") == 0
+    assert [p["group"] for p in result(events(capsys))] == ["retroarch"]
+    assert run("--json", "status", "--appid", "1") == 0
+    assert result(events(capsys)) == []

@@ -25,8 +25,28 @@ See `docs/design.md`.
 - [ ] Hardware test pass (checklist in `docs/install.md` §8)
 
 ## Phase 2 — memcard-decky
-- [ ] Spike: Decky launch-option install + wrapper↔plugin channel for Game Mode conflict prompts (D3)
-- [ ] QAM panel: status, sync button, conflict modal, setup wizard over `memcard --json`
+Decision (2026-10-18): the plugin intercepts Steam's game launch (cancel → sync → relaunch) and
+pushes on Steam's exit event, instead of writing `memcard wrap` into launch options. SRM rewrites
+launch options, and `%command%` expansion for shortcuts is unverified. `wrap` stays for Bazzite.
+
+### 2a. Core additions (PR: feat/core-plugin-hooks)
+- [x] `memcard groups --json`: groups with appids, plus machine/remote info (the plugin's mapping source)
+- [x] `sync --appid N` / `status --appid N`: the groups mapped to an appid
+- [x] `sync --before-launch`: launch_timeout_s deadline + a running marker that lasts until `--after-exit`
+- [x] `sync --after-exit`: idle priority, wait for the emulator to exit and writes to settle, then sync
+- [x] `wrap` reuses the same before/after functions; periodic skips while an app-marker is live
+- [x] Tests + docs (CLAUDE.md, design §8)
+
+### 2b. Plugin (PR: feat/decky, stacked on 2a)
+- [ ] Scaffold from decky-plugin-template (@decky/ui, @decky/api, @decky/rollup, pnpm 9); no root flag
+- [ ] Backend main.py: run bundled `bin/memcard` with system python3, clean env, allowlisted subcommands,
+      stream NDJSON events via decky.emit, cancel with SIGTERM; install rclone (sha256-verified) on request
+- [ ] Launch interceptor: GameActionStart → mapped appid? cancel → before-launch sync → conflict modal → relaunch (one-shot skip)
+- [ ] Exit: lifetime notification (appid fallback: last launched) → after-exit sync → toast
+- [ ] QAM panel: status, Sync now, pending conflicts → resolve modal, auto-sync toggle, detect saves
+- [ ] Setup wizard: existing remotes, provider fields one at a time, validate, apply, OAuth token paste/file, mapped errors
+- [ ] Build script → installable zip (bundles the memcard zipapp); backend unit tests; tsc + rollup build in CI
+- [ ] docs/install.md: Deck section uses the plugin
 
 ## Phase 3 — memcard-gui
 - [ ] Pick GTK4 vs Qt; Flatpak manifest with rsync + rclone bundled

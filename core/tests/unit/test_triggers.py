@@ -50,3 +50,19 @@ def test_timer_is_a_low_priority_oneshot():
     assert "Type=oneshot" in service and "Nice=19" in service and "IOSchedulingClass=idle" in service
     assert "--periodic" in service
     assert "OnUnitActiveSec=30min" in units["memcard.timer"]
+
+
+def test_ui_launch_markers_expire(tmp_path, monkeypatch):
+    import os
+
+    from memcard.paths import Dirs
+
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    dirs = Dirs.resolve()
+    cfg = type("C", (), {"groups": []})()
+    triggers.mark_app_running(dirs, 42)
+    assert triggers.game_running(cfg, dirs)
+    old = time.time() - triggers.APP_MARKER_TTL_S - 1
+    os.utime(dirs.running / "app-42", (old, old))
+    assert not triggers.game_running(cfg, dirs)
+    assert not (dirs.running / "app-42").exists()
