@@ -1,8 +1,10 @@
 """The cloud leg: a thin wrapper around the rclone binary. No sync logic.
 
-Only one-directional commands are used (copy, copyto, cat, lsjson, delete).
-Never bisync: it keeps its own state and conflict rules, which would fight
-Memcard's three-way snapshot.
+Only one-directional commands are used (copy, rcat, cat, lsf, lsjson, delete,
+deletefile, plus obscure and config dump for setup). Never bisync: it keeps
+its own state and conflict rules, which would fight Memcard's three-way
+snapshot. Never copy/copyto for a file that changes in place: they skip
+"matching" files, and some backends match on size alone.
 """
 
 from __future__ import annotations

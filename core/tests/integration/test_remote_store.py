@@ -83,3 +83,42 @@ def test_gc_keeps_referenced_and_recent_objects(store, tmp_path, monkeypatch):
     remaining = {p.name for p in (store.dir / "objects").rglob("*") if p.is_file()}
     assert remaining == {files["b"][0]}
     assert result == {"history_pruned": 0, "objects_deleted": 2}
+
+
+def test_gc_aborts_instead_of_deleting_when_a_listing_fails(store, tmp_path, monkeypatch):
+    from memcard.errors import RemoteError
+    from memcard.store import remote as remote_mod
+
+    f = tmp_path / "live"
+    f.write_bytes(b"live")
+    sha = sha256(f)
+    store.upload({sha: f})
+    store.commit(manifest(1, None, {"x": FileEntry(sha, 4)}))
+    monkeypatch.setattr(remote_mod, "GC_GRACE", remote_mod.timedelta(seconds=-60))
+    real_raw = store.rclone.raw
+
+    def flaky(*args, **kw):
+        if args[:2] == ("lsf", "--dirs-only"):
+            import subprocess
+
+            return subprocess.CompletedProcess(args, 7, "", "HTTP error 429: Too Many Requests")
+        return real_raw(*args, **kw)
+
+    monkeypatch.setattr(store.rclone, "raw", flaky)
+    with pytest.raises(RemoteError):
+        store.gc(keep=2)
+    assert (store.dir / "objects" / object_rel(sha)).exists()
+
+
+def test_gc_refuses_a_folder_without_the_marker(store, tmp_path):
+    (store.dir / "objects/ab").mkdir(parents=True)
+    (store.dir / "objects/ab" / ("ab" + "0" * 62)).write_text("not ours")
+    with pytest.raises(ConfigError, match="isn't a Memcard folder"):
+        store.gc(keep=2)
+
+
+def test_probe_leftovers_dont_block_claiming_an_empty_folder(store):
+    store.dir.mkdir()
+    (store.dir / ".memcard-probe-abc123").write_text("x")
+    store.commit(manifest(1, None))
+    assert store.head("g").generation == 1

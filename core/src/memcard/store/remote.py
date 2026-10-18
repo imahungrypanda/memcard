@@ -21,13 +21,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..errors import ConfigError, RemoteChanged, RemoteCorrupt
-from ..model import FORMAT, Manifest, utcnow
+from ..model import FORMAT, SHA256, Manifest, utcnow
 from ..scan import sha256
 from ..transport.rclone import Rclone
 
 log = logging.getLogger(__name__)
 
 MARKER = "memcard-remote.json"
+PROBE_PREFIX = ".memcard-probe-"  # setup's round-trip test file; may be left behind if its delete failed
 GC_GRACE = timedelta(days=1)  # don't collect objects a push in flight may be about to commit
 
 
@@ -57,26 +58,39 @@ class RemoteStore:
             self.rclone.check(result)
         if not result.stdout.strip():
             return None  # some backends cat a missing file as empty
-        return json.loads(result.stdout)
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            raise _corrupt("/".join(parts), str(e)) from e
+        if not isinstance(data, dict):
+            raise _corrupt("/".join(parts), "not a JSON object")
+        return data
 
     def write_json(self, data: dict, *parts: str) -> None:
-        self.scratch.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=self.scratch, suffix=".json")
-        try:
-            with os.fdopen(fd, "w") as f:
-                json.dump(data, f, indent=1)
-            self.rclone("copyto", tmp, self._p(*parts))
-        finally:
-            os.unlink(tmp)
+        """Always replaces the file.
 
-    def ensure_initialized(self) -> None:
-        """Claim the folder for Memcard, but only if it's empty or already ours. Runs before any write."""
+        Not `copyto`: that skips the upload when the destination "matches",
+        and on backends without modtimes or hashes (WebDAV vendor=other) that
+        means same size. Two HEAD.json files of equal length would silently
+        leave the old commit in place. `rcat` uploads unconditionally.
+        """
+        self.rclone("rcat", self._p(*parts), input=json.dumps(data, indent=1))
+
+    def ensure_initialized(self, create: bool = True) -> None:
+        """Claim the folder for Memcard, but only if it's empty or already ours. Runs before any write.
+
+        With ``create=False`` (destructive maintenance such as gc) the marker
+        must already exist.
+        """
         if self._initialized:
             return
         marker = self.read_json(MARKER)
         if marker is None:
+            if not create:
+                raise ConfigError(f"{self.spec} isn't a Memcard folder (no {MARKER}); refusing to touch it.")
             listing = self.rclone.raw("lsf", "--max-depth", "1", self.spec)
-            if listing.returncode == 0 and listing.stdout.strip():
+            leftovers = [n for n in listing.stdout.split() if not n.startswith(PROBE_PREFIX)]
+            if listing.returncode == 0 and leftovers:
                 raise ConfigError(
                     f"The remote folder {self.spec} already has other files in it.",
                     hint="Choose an empty folder (or a new folder name) for Memcard in setup.",
@@ -91,8 +105,16 @@ class RemoteStore:
     # --- manifests ----------------------------------------------------------------
 
     def head(self, group: str) -> Manifest | None:
-        data = self.read_json("groups", group, "HEAD.json")
-        return Manifest.from_dict(data) if data else None
+        return self._manifest("groups", group, "HEAD.json")
+
+    def _manifest(self, *parts: str) -> Manifest | None:
+        data = self.read_json(*parts)
+        if not data:
+            return None
+        try:
+            return Manifest.from_dict(data)
+        except (KeyError, TypeError, ValueError) as e:
+            raise _corrupt("/".join(parts), str(e)) from e
 
     def commit(self, manifest: Manifest) -> None:
         """Compare-and-swap HEAD: refuse if someone else committed since we read it.
@@ -110,6 +132,13 @@ class RemoteStore:
         doc = manifest.to_dict()
         self.write_json(doc, "groups", manifest.group, "history", f"{manifest.generation}.json")
         self.write_json(doc, "groups", manifest.group, "HEAD.json")
+        # Read it back: a commit we only *think* happened would be recorded in
+        # the snapshot and roll the save back on the next sync.
+        landed = self.head(manifest.group)
+        if not landed or (landed.generation, landed.committed_by, landed.committed_at) != (
+            manifest.generation, manifest.committed_by, manifest.committed_at
+        ):
+            raise RemoteChanged(f"{manifest.group}: HEAD.json didn't take our commit.")
 
     def history(self, group: str) -> list[int]:
         result = self.rclone.raw("lsf", "--files-only", self._p("groups", group, "history"))
@@ -120,8 +149,7 @@ class RemoteStore:
         return sorted(int(n.removesuffix(".json")) for n in result.stdout.split() if n.removesuffix(".json").isdigit())
 
     def manifest_at(self, group: str, generation: int) -> Manifest | None:
-        data = self.read_json("groups", group, "history", f"{generation}.json")
-        return Manifest.from_dict(data) if data else None
+        return self._manifest("groups", group, "history", f"{generation}.json")
 
     # --- objects -------------------------------------------------------------------
 
@@ -160,7 +188,8 @@ class RemoteStore:
                 path.unlink(missing_ok=True)
                 raise RemoteCorrupt(
                     "A save file on the remote is missing or damaged.",
-                    hint="Nothing local was changed. Try again; if it keeps happening, sync from the other machine to re-upload it.",
+                    hint="Nothing local was changed. Try again; if it keeps happening, recover an earlier version with "
+                    "`memcard export GROUP DIR --generation N` or from the other machine's trash.",
                     detail=f"object {sha}",
                 )
             out[sha] = path
@@ -169,8 +198,15 @@ class RemoteStore:
     # --- garbage collection ------------------------------------------------------
 
     def gc(self, keep: int) -> dict[str, int]:
-        """Prune history to ``keep`` generations per group, then delete unreferenced objects."""
+        """Prune history to ``keep`` generations per group, then delete unreferenced objects.
+
+        Any listing failure aborts: an incomplete view of what's referenced
+        would make live objects look like garbage.
+        """
+        self.ensure_initialized(create=False)
         groups_ls = self.rclone.raw("lsf", "--dirs-only", self._p("groups"))
+        if groups_ls.returncode != 0 and not Rclone.is_missing(groups_ls):
+            self.rclone.check(groups_ls)
         groups = [g.rstrip("/") for g in groups_ls.stdout.split()] if groups_ls.returncode == 0 else []
         referenced: set[str] = set()
         pruned = 0
@@ -189,12 +225,14 @@ class RemoteStore:
 
         objects = self.rclone.raw("lsjson", "-R", "--files-only", self._p("objects"))
         if objects.returncode != 0:
-            return {"history_pruned": pruned, "objects_deleted": 0}
+            if Rclone.is_missing(objects):
+                return {"history_pruned": pruned, "objects_deleted": 0}
+            self.rclone.check(objects)
         cutoff = datetime.now(timezone.utc) - GC_GRACE
         doomed = []
         for item in json.loads(objects.stdout or "[]"):
             sha = item["Name"]
-            if sha in referenced:
+            if sha in referenced or not SHA256.match(sha):
                 continue
             if datetime.fromisoformat(item["ModTime"].replace("Z", "+00:00")) > cutoff:
                 continue
@@ -202,3 +240,11 @@ class RemoteStore:
         if doomed:
             self.rclone("delete", self._p("objects"), "--files-from", "-", input="\n".join(doomed) + "\n")
         return {"history_pruned": pruned, "objects_deleted": len(doomed)}
+
+
+def _corrupt(where: str, why: str) -> RemoteCorrupt:
+    return RemoteCorrupt(
+        f"Memcard's data on the remote is damaged ({where}).",
+        hint="Nothing local was changed. Check the remote folder wasn't edited by hand; earlier versions are in history/.",
+        detail=why,
+    )

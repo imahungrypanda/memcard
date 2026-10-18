@@ -3,11 +3,31 @@
 from __future__ import annotations
 
 import enum
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 FORMAT = 1
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def check_relpath(path: str) -> str:
+    """Reject anything that could escape a group's folder or the object cache.
+
+    Manifests come from the remote, which anyone with access to the cloud
+    folder can edit, so every path is checked before it gets near the disk.
+    """
+    parts = path.split("/")
+    if (
+        not path
+        or path.startswith("/")
+        or "\\" in path
+        or "\0" in path
+        or any(part in ("", ".", "..") for part in parts)
+    ):
+        raise ValueError(f"unsafe path in manifest: {path!r}")
+    return path
 
 
 def utcnow() -> str:
@@ -29,6 +49,8 @@ class FileEntry:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> FileEntry:
+        if not isinstance(d.get("sha256"), str) or not SHA256.match(d["sha256"]):
+            raise ValueError(f"bad sha256 in manifest: {d.get('sha256')!r}")
         return cls(
             sha256=d["sha256"],
             size=int(d["size"]),
@@ -45,7 +67,7 @@ Files = dict[str, FileEntry]  # relpath (posix) -> entry
 
 
 def _files_from(d: dict[str, Any]) -> Files:
-    return {path: FileEntry.from_dict(e) for path, e in d.items()}
+    return {check_relpath(path): FileEntry.from_dict(e) for path, e in d.items()}
 
 
 def _files_to(files: Files) -> dict[str, Any]:

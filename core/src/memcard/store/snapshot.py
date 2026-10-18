@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ..errors import MemcardError
 from ..model import Snapshot
 from ..paths import atomic_write
 
@@ -17,7 +18,14 @@ def load(root: Path, group_id: str) -> Snapshot | None:
     p = path_for(root, group_id)
     if not p.exists():
         return None
-    return Snapshot.from_dict(json.loads(p.read_text()))
+    try:
+        return Snapshot.from_dict(json.loads(p.read_text()))
+    except (KeyError, TypeError, ValueError) as e:
+        raise MemcardError(
+            f"Memcard's record of the last sync for {group_id!r} is damaged.",
+            hint=f"Delete {p} and sync again. Files that differ will be asked about once, as on a first sync.",
+            detail=str(e),
+        ) from e
 
 
 def save(root: Path, snapshot: Snapshot) -> None:
