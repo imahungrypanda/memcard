@@ -293,7 +293,7 @@ def test_unmapped_appid_is_a_quiet_no_op(machine, capsys):
     capsys.readouterr()
     assert run("--json", "sync", "--appid", "1", "--before-launch") == 0
     data = result(events(capsys))
-    assert data == {"results": [], "appid": 1, "mapped": False}
+    assert data["results"] == [] and data["mapped"] is False and data["launch_id"]
     assert run("--json", "sync", "--appid", "1", "--after-exit") == 0
     assert not (Dirs.resolve().running / "app-1").exists()
 
@@ -392,3 +392,19 @@ def test_conflict_resolved_after_before_launch_keeps_the_launch_marked(machine, 
 )
 def test_contradictory_flags_are_config_errors(machine, argv):
     assert run(*argv) == 4
+
+
+def test_leftover_marker_from_a_lost_exit_doesnt_block_the_next_push(machine, capsys, monkeypatch):
+    """Game 999's exit was never reported; playing 4242 afterwards must still push."""
+    from memcard import config, triggers
+    from memcard.engine import Engine
+
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    run("sync", "--appid", "999", "--before-launch", "--launch-id", "lost")
+    run("sync", "--appid", "4242", "--before-launch", "--launch-id", "a")
+    (machine / "fr.srm").write_bytes(b"played")
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "4242", "--after-exit", "--launch-id", "a") == 0
+    assert result(events(capsys))["results"][0]["pushed"] == ["fr.srm"]
+    d = Dirs.resolve()
+    assert Engine(config.load(d.config_file), d).store.head("retroarch").files["fr.srm"].size == len(b"played")

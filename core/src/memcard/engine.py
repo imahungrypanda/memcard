@@ -84,7 +84,7 @@ class Engine:
         self.rclone = Rclone(remote.rclone_config or dirs.rclone_config, providers.get(remote.provider), self.deadline)
         self.store = RemoteStore(self.rclone, remote.spec, dirs.objects, dirs.staging, cfg.machine_id)
         self.trash = Trash(dirs.trash, cfg.sync.trash_versions)
-        self.abort_if: Callable[[], bool] | None = None
+        self.abort_if: Callable[[], object] | None = None
         self._group_root = Path()
 
     # --- locking -------------------------------------------------------------
@@ -122,9 +122,10 @@ class Engine:
 
     # --- syncing ---------------------------------------------------------------------
 
-    def sync(self, groups: list[Group], decide: Decider = no_decisions, abort_if: Callable[[], bool] | None = None) -> list[GroupResult]:
+    def sync(self, groups: list[Group], decide: Decider = no_decisions, abort_if: Callable[[], object] | None = None) -> list[GroupResult]:
         """``abort_if`` is polled at safe points (between groups, before any local
-        write); background syncs pass "a game started" so they get out of the way."""
+        write); background syncs pass "a game started" so they get out of the way.
+        A truthy result stops the sync; a string result is used as the message."""
         self.abort_if = abort_if
         results: list[GroupResult] = []
         with self.lock():
@@ -217,8 +218,10 @@ class Engine:
 
     def _safe_point(self) -> None:
         self.deadline.check()
-        if self.abort_if and self.abort_if():
-            raise Cancelled("A game started, so background sync stopped.", hint="It'll run again later.")
+        reason = self.abort_if() if self.abort_if else None
+        if reason:
+            message = reason if isinstance(reason, str) else "A game started, so background sync stopped."
+            raise Cancelled(message, hint="It'll run again later.")
 
     def _staging(self) -> Path:
         self.dirs.staging.mkdir(parents=True, exist_ok=True)

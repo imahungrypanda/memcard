@@ -8,15 +8,15 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import re
-import uuid
 import json
 import logging
+import re
 import shutil
 import signal
 import socket
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -440,7 +440,8 @@ def cmd_sync(ctx: Ctx) -> int:
     if a.periodic:
         results = triggers.periodic(ctx.cfg, ctx.dirs, ctx.events)
     elif a.before_launch:
-        results = triggers.before_launch(ctx.cfg, ctx.dirs, a.appid, a.launch_id or uuid.uuid4().hex, ctx.events, decide)
+        launch_id = a.launch_id or uuid.uuid4().hex
+        results = triggers.before_launch(ctx.cfg, ctx.dirs, a.appid, launch_id, ctx.events, decide)
     elif a.after_exit:
         results = triggers.after_exit(ctx.cfg, ctx.dirs, a.appid, a.launch_id, ctx.events, decide)
     else:
@@ -452,6 +453,8 @@ def cmd_sync(ctx: Ctx) -> int:
         if a.appid is not None:
             data["appid"] = a.appid
             data["mapped"] = bool(ctx.cfg.groups_for_appid(a.appid))
+        if a.before_launch:
+            data["launch_id"] = launch_id  # pass back to --after-exit
         if a.after_exit:
             data["stale"] = stale
         ctx.out(data)

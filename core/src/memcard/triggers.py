@@ -68,23 +68,29 @@ def mark_app_running(dirs: Dirs, appid: int, launch_id: str) -> None:
     _app_marker(dirs, appid).write_text(launch_id)
 
 
-def marked_running(dirs: Dirs) -> bool:
-    """A launch Memcard knows about (wrap's pid, or a UI's app marker) is live. Cleans stale ones."""
-    live = False
+def live_markers(dirs: Dirs) -> dict[str, int]:
+    """Launches Memcard knows about (wrap's pid, or a UI's app marker), by name -> mtime_ns.
+    Cleans up stale ones as it goes."""
+    live: dict[str, int] = {}
     if dirs.running.is_dir():
         now = time.time()
         for marker in dirs.running.iterdir():
             try:
+                st = marker.stat()
                 if marker.name.isdigit() and _alive(int(marker.name)):
-                    live = True
+                    live[marker.name] = st.st_mtime_ns
                     continue
-                if marker.name.startswith("app-") and now - marker.stat().st_mtime < APP_MARKER_TTL_S:
-                    live = True
+                if marker.name.startswith("app-") and now - st.st_mtime < APP_MARKER_TTL_S:
+                    live[marker.name] = st.st_mtime_ns
                     continue
             except FileNotFoundError:
                 continue  # removed by an --after-exit while we looked
             marker.unlink(missing_ok=True)  # stale: wrapper killed, or exit never reported
     return live
+
+
+def marked_running(dirs: Dirs) -> bool:
+    return bool(live_markers(dirs))
 
 
 def game_running(cfg: Config, dirs: Dirs) -> bool:
@@ -177,10 +183,20 @@ def after_exit(cfg: Config, dirs: Dirs, appid: int, launch_id: str | None, event
     groups = cfg.groups_for_appid(appid)
     if not groups:
         return []
+    # Stop at a safe point if a game is launched while this runs, but only a
+    # launch that's new (or relaunched) since now: a leftover marker from a
+    # session whose exit was never reported mustn't block this push. Markers
+    # only, not running Flatpaks: a slow-to-quit emulator mustn't block its own push.
+    before = live_markers(dirs)
+
+    def new_launch() -> str | None:
+        now = live_markers(dirs)
+        if any(before.get(name) != mtime for name, mtime in now.items()):
+            return "A game was launched, so this post-game sync stopped. It'll finish after that game."
+        return None
+
     _settle(groups, cfg, events, appid)
-    # Marker-only on purpose: a slow-to-quit emulator mustn't block its own push,
-    # but a new launch (of anything) must stop this pass at a safe point.
-    return Engine(cfg, dirs, events).sync(groups, decide, abort_if=lambda: marked_running(dirs))
+    return Engine(cfg, dirs, events).sync(groups, decide, abort_if=new_launch)
 
 
 def _settle(groups: list[Group], cfg: Config, events: Events, appid: int | None) -> None:
