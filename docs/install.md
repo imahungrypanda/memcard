@@ -1,13 +1,12 @@
 # Installing and testing Memcard
 
-This covers the **command-line core**, which is what exists today. The Decky
-plugin and the desktop GUI come next. Until then:
+- **Steam Deck:** use the **Decky plugin**. Setup, syncing around games, and
+  conflict prompts all happen in Game Mode (§2).
+- **Bazzite PC:** use the **command line** plus a Steam launch option, until the
+  desktop GUI exists (§3). Conflicts are settled in a terminal; until then the
+  saves involved are left untouched.
 
-- Setup and conflict decisions happen in a terminal (Desktop Mode on the Deck).
-- In Game Mode, sync runs automatically through a Steam launch option. If it hits
-  a conflict, it **leaves those saves untouched**, launches the game anyway, and
-  logs it. You resolve it later from a terminal. Nothing is ever overwritten
-  without a decision.
+Nothing is ever overwritten without a decision.
 
 Rough time: 20 minutes for the first machine, 10 for the second.
 
@@ -33,22 +32,56 @@ tar -czhf ~/saves-backup-$(date +%F).tar.gz -C ~/Emulation saves
 
 ```bash
 cd ~/Code/memcard
-scripts/build-zipapp.sh        # -> dist/memcard, a single ~100 KB file
+scripts/build-decky.sh         # -> dist/memcard-decky.zip (the plugin) and dist/memcard (the CLI)
 ```
 
-`dist/memcard` is the whole program. It needs only the system `python3` (3.11+),
-`rsync` and `rclone`, so nothing gets installed into the read-only OS.
+`dist/memcard` is the whole command-line program, a single ~130 KB file. It needs only
+the system `python3` (3.11+), `rsync` and `rclone`, so nothing gets installed into the
+read-only OS. The plugin zip bundles the same file.
 
 Get it onto each machine any way you like: USB stick, your Nextcloud, or `scp`
 (on the Deck, set a password with `passwd` and run `sudo systemctl start sshd` first):
 
 ```bash
-scp dist/memcard deck@steamdeck:~/memcard
+scp dist/memcard-decky.zip deck@steamdeck:~/Downloads/
+scp dist/memcard bazzite-user@bazzite:~/memcard
 ```
 
 ---
 
-## 2. Steam Deck
+## 2. Steam Deck (Decky plugin)
+
+You need [Decky Loader](https://decky.xyz) installed.
+
+1. **Turn on developer mode in Decky:** Quick Access (`…` button) → Decky (plug icon) → ⚙
+   Settings → **Developer mode** on.
+2. **Install the plugin:** Decky ⚙ → **Developer** → **Install plugin from ZIP file** →
+   pick `~/Downloads/memcard-decky.zip`.
+3. **Open Memcard** in the Quick Access menu and press **Set up Memcard**:
+   - **Name this Deck**, e.g. "Steam Deck".
+   - **Choose where your saves live.** For Nextcloud, first make an app password in a browser:
+     **avatar → Settings → Security → Devices & sessions → Create new app password**.
+     Then enter the username, the URL (`https://YOUR-SERVER/remote.php/dav/files/YOUR-USERNAME/`)
+     and the app password, one at a time. Each one is checked before moving on.
+   - If it says rclone isn't installed, press **Install rclone**. It downloads the official
+     build, checks its checksum, and keeps it in Memcard's own folder.
+   - Memcard writes a test file, reads it back and deletes it. It only says
+     **Connected** if all three work.
+4. Press **Find EmuDeck saves**, check the list, and press **Add**. Groups get mapped to
+   your Steam shortcuts automatically.
+5. Press **Sync now** for the first sync (on the first machine everything goes up).
+
+From then on, pressing **Play** on a mapped game syncs first, asks about any conflict
+in a pop-up, then starts the game. After you quit, it uploads the new saves. You'll see
+a short toast each time. Turn this off with **Sync around games** in the panel.
+
+Review the groups in `~/.config/memcard/config.toml` (Desktop Mode) if you want to
+change what's synced; see the `unit` notes in §2.5 below.
+
+**Without the plugin**, you can set the Deck up exactly like the PC: the rest of this
+section is the terminal route, and §4 covers the Steam launch option.
+
+### Terminal route
 
 Switch to **Desktop Mode** and open **Konsole**.
 
@@ -64,25 +97,24 @@ install system packages on SteamOS.
 
 ### 2.2 Install rclone and Memcard into your home folder
 
-Both go in `~/.local/bin`, which survives SteamOS updates.
+Both survive SteamOS updates.
 
 ```bash
 mkdir -p ~/.local/bin
-cd /tmp
-curl -fLO https://downloads.rclone.org/rclone-current-linux-amd64.zip
-python3 -m zipfile -e rclone-current-linux-amd64.zip rclone-extract
-cp rclone-extract/rclone-*-linux-amd64/rclone ~/.local/bin/
-chmod +x ~/.local/bin/rclone
-
 mv ~/memcard ~/.local/bin/memcard     # wherever you copied it to
 chmod +x ~/.local/bin/memcard
 
-# Make both available in Konsole from now on
+# Make it available in Konsole from now on
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 
-rclone version && memcard --version
+memcard --version
+memcard setup install-rclone          # skip if `rclone version` already works
 ```
+
+`install-rclone` downloads the official static build, checks it against rclone's
+published SHA-256 sums, and keeps it in `~/.local/share/memcard/bin/`, where Memcard
+looks for it.
 
 ### 2.3 Name this machine
 
@@ -197,9 +229,10 @@ Whatever you pick, the version that loses is copied to the trash first (§6).
 
 ---
 
-## 4. Hook it into Steam (both machines)
+## 4. Hook it into Steam (PC, or a Deck without the plugin)
 
-This is what makes sync automatic. It pulls before a game starts and pushes after it fully exits.
+The Decky plugin does this for you on the Deck. Everywhere else, a launch option makes
+sync automatic. It pulls before a game starts and pushes after it fully exits.
 
 In Steam (Game Mode works): select the game → **⚙ → Properties → Launch Options**,
 and put this **in front of** whatever is already there:
@@ -324,5 +357,20 @@ cloud, with EmuDeck-shaped symlinks. These parts need your hardware:
 - [ ] Post-exit waits for the emulator: save in-game, quit, and the push includes that save.
 - [ ] No noticeable slowdown starting or playing a game.
 - [ ] A real conflict: play the same game on both machines without syncing, then resolve it.
+
+**Decky plugin** (none of this has run on a real Deck yet):
+
+- [ ] The plugin installs from the zip and the Memcard panel opens.
+- [ ] Setup works end to end in Game Mode: the Steam keyboard in text fields, password
+      fields hidden, Install rclone, and the "Connected" round trip.
+- [ ] Pressing Play on a mapped SRM shortcut shows "Syncing saves before launch…" and
+      the game then starts **once** (not twice, and not stuck in a cancel loop).
+- [ ] A conflict before launch shows the pop-up, each button does what it says, and the
+      game starts afterwards.
+- [ ] After quitting, a "Saves synced" toast appears, and `memcard log` shows `postexit`.
+      (If no toast appears, Steam may report appid 0 for shortcuts; tell me.)
+- [ ] An unmapped game and a regular Steam game launch exactly as before, with no delay.
+- [ ] Find EmuDeck saves → Add maps your shortcuts. Check what would sync and Sync now
+      show sensible results.
 
 Tell me which boxes fail, with `memcard log -n 100` output, and I'll fix them.
