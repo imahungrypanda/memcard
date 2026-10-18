@@ -202,3 +202,16 @@ def test_agreed_files_skip_unresolved_units():
     actions, unresolved = actions_for(g, plan, {}, alt)
     agreed = agreed_files(plan, actions, unresolved)
     assert agreed == {"push": B, "pull": B, "same": B}
+
+
+def test_unknown_subtrees_are_left_alone_on_every_side():
+    """An unplugged drive behind a symlink must not look like deleted saves."""
+    g = group("file")
+    plan = plan_group(g, {"z.srm": A}, manifest({"gba/e.srm": B, "z.srm": A}), snap({"gba/e.srm": B, "z.srm": A}), unknown=["gba"])
+    assert [c.path for u in plan.units for c in u.files] == ["z.srm"]
+
+
+def test_pulls_carry_the_local_state_they_were_planned_against():
+    g, plan = conflict_plan()
+    actions, _ = actions_for(g, plan, {"s.srm": Resolution.REMOTE}, alt)
+    assert actions[0].expect == B

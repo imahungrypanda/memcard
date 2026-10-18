@@ -34,8 +34,9 @@ def emudeck(tmp_path):
 def test_scan_follows_symlinks_without_looping(emudeck):
     _, emu, _ = emudeck
     g = Group(id="ra", root=emu / "saves", unit="file", include=["*.srm"])
-    files = scan.scan(g)
+    files, unknown = scan.scan(g)
     assert set(files) == {"gba/FireRed.srm", "linked.srm"}
+    assert unknown == []
     assert files["gba/FireRed.srm"].size == 128
 
 
@@ -101,3 +102,38 @@ def test_trash_keeps_n_versions_and_never_prunes_kept_alternates(tmp_path):
     assert sum(not b.kept for b in batches) == 2
     assert any(b.kept for b in batches)
     assert batches[0].files() == ["s.srm"]
+
+
+def test_trash_prunes_oldest_first_even_past_ten_batches_a_second(tmp_path, monkeypatch):
+    from memcard.store import trash as trash_mod
+
+    class Frozen(trash_mod.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 17, 21, 30, 0, tzinfo=tz)
+
+    monkeypatch.setattr(trash_mod, "datetime", Frozen)
+    f = tmp_path / "s.srm"
+    trash = Trash(tmp_path / "trash", keep=3)
+    for n in range(1, 13):
+        f.write_bytes(str(n).encode())
+        trash.put(trash.new_batch("g"), f, "s.srm")
+    trash.prune("g")
+    assert [b.name for b in trash.batches("g")] == ["20261017T213000Z.10", "20261017T213000Z.11", "20261017T213000Z.12"]
+
+
+def test_dangling_symlink_and_unreadable_dir_are_reported_unknown(tmp_path):
+    root = tmp_path / "saves"
+    (root / "ok").mkdir(parents=True)
+    (root / "ok/a.srm").write_bytes(b"a")
+    (root / "gone").symlink_to(tmp_path / "unplugged-drive")
+    locked = root / "locked"
+    locked.mkdir()
+    (locked / "b.srm").write_bytes(b"b")
+    locked.chmod(0)
+    try:
+        files, unknown = scan.walk(Group(id="g", root=root))
+    finally:
+        locked.chmod(0o755)
+    assert set(files) == {"ok/a.srm"}
+    assert sorted(unknown) == ["gone", "locked"]

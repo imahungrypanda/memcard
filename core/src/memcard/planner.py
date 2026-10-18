@@ -22,7 +22,7 @@ Per unit (files that must move together), the verdicts combine:
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config import Group
 from .model import FileChange, FileEntry, Files, GroupPlan, Manifest, Resolution, Snapshot, UnitPlan, Verdict
@@ -55,9 +55,22 @@ def combine(verdicts: list[Verdict]) -> Verdict:
     return Verdict.CONFLICT
 
 
-def plan_group(group: Group, local: Files, remote: Manifest | None, snapshot: Snapshot | None) -> GroupPlan:
+def plan_group(
+    group: Group,
+    local: Files,
+    remote: Manifest | None,
+    snapshot: Snapshot | None,
+    unknown: list[str] | tuple[str, ...] = (),
+) -> GroupPlan:
+    """``unknown`` lists local relpaths that couldn't be read (see scan.walk).
+    Everything under them is left out on every side: not pushed as deleted,
+    not pulled over."""
+
+    def hidden(path: str) -> bool:
+        return any(path == u or path.startswith(u + "/") for u in unknown)
+
     def scoped(files: Files) -> Files:
-        return {p: e for p, e in files.items() if group.wants(p)}
+        return {p: e for p, e in files.items() if group.wants(p) and not hidden(p)}
 
     lf = scoped(local)
     rf = scoped(remote.files) if remote else {}
@@ -101,12 +114,17 @@ class Action:
     pull         make the local ``path`` equal ``entry`` (None = delete)
     copy_local   copy local ``path`` to ``new_path`` (keep-both for single files)
     stash_local  save local ``path`` to the trash as a kept alternate (keep-both for multi-file units)
+
+    ``expect`` is the local state a pull was planned against. The engine
+    checks it right before overwriting, so a save written after the scan
+    causes a replan instead of being lost.
     """
 
     kind: str
     path: str
     entry: FileEntry | None = None
     new_path: str | None = None
+    expect: FileEntry | None = field(default=None, compare=False)
 
 
 def _differs(c: FileChange) -> bool:
@@ -132,14 +150,14 @@ def actions_for(
         if u.verdict is Verdict.PUSH:
             rest += [Action("push", c.path, c.local) for c in u.files if c.verdict is Verdict.PUSH]
         elif u.verdict is Verdict.PULL:
-            rest += [Action("pull", c.path, c.remote) for c in u.files if c.verdict is Verdict.PULL]
+            rest += [Action("pull", c.path, c.remote, expect=c.local) for c in u.files if c.verdict is Verdict.PULL]
         elif u.verdict is Verdict.CONFLICT:
             decision = decisions.get(u.key)
             changed = [c for c in u.files if _differs(c)]
             if decision is Resolution.LOCAL:
                 rest += [Action("push", c.path, c.local) for c in changed]
             elif decision is Resolution.REMOTE:
-                rest += [Action("pull", c.path, c.remote) for c in changed]
+                rest += [Action("pull", c.path, c.remote, expect=c.local) for c in changed]
             elif decision is Resolution.BOTH:
                 renameable = group.unit == "file" and not group.single and len(changed) == 1
                 if renameable:
@@ -149,12 +167,13 @@ def actions_for(
                         first.append(Action("copy_local", c.path, c.local, new_path=alt))
                         rest.append(Action("push", alt, c.local))
                     if c.remote is not None or c.local is None:
-                        rest.append(Action("pull", c.path, c.remote))
+                        # After copy_local the original still holds c.local; it's trashed before the overwrite.
+                        rest.append(Action("pull", c.path, c.remote, expect=c.local))
                     else:  # remote deleted it, local kept it: keeping both is keeping local
                         rest.append(Action("push", c.path, c.local))
                 else:
                     first += [Action("stash_local", c.path, c.local) for c in u.files if c.local is not None]
-                    rest += [Action("pull", c.path, c.remote) for c in changed]
+                    rest += [Action("pull", c.path, c.remote, expect=c.local) for c in changed]
             else:
                 unresolved.append(u)
     return first + rest, unresolved

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -30,6 +31,11 @@ def find_tool(name: str) -> str:
     raise ToolMissing(f"{name} isn't installed.", hint=_HINTS.get(name))
 
 
+# Set by the CLI's SIGTERM handler. Checked at the engine's safe points, so a
+# cancel never interrupts a local restore halfway through a unit.
+CANCEL = threading.Event()
+
+
 class Deadline:
     """A wall-clock budget shared by every step of a sync. ``None`` means no limit."""
 
@@ -43,7 +49,7 @@ class Deadline:
         return max(0.0, self.at - time.monotonic())
 
     def check(self) -> None:
-        if self.cancelled:
+        if self.cancelled or CANCEL.is_set():
             raise Cancelled("Sync was cancelled.")
         if self.at is not None and time.monotonic() >= self.at:
             raise Cancelled("Sync ran out of time.", hint="Nothing was left half-done; the next sync picks up from here.")

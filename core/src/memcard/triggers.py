@@ -74,7 +74,7 @@ def _fingerprint(groups: list[Group]) -> dict:
     out = {}
     for g in groups:
         try:
-            for rel, p in scan.walk(g).items():
+            for rel, p in scan.walk(g)[0].items():
                 st = p.stat()
                 out[(g.id, rel)] = (st.st_size, st.st_mtime_ns)
         except (LocalPathMissing, OSError):
@@ -101,44 +101,63 @@ def wait_until_settled(groups: list[Group], timeout_s: float, poll_s: float = 1.
         previous = current
 
 
-def _sync(cfg: Config, dirs: Dirs, groups: list[Group], events: Events, decide: Decider, seconds: float | None) -> list:
+def _sync(cfg: Config, dirs: Dirs, groups: list[Group], events: Events, decide: Decider, seconds: float | None,
+          abort_if=None) -> list:
+    """Never raises: a sync problem must not stop a game from launching."""
     try:
-        return Engine(cfg, dirs, events, Deadline(seconds)).sync(groups, decide)
+        return Engine(cfg, dirs, events, Deadline(seconds)).sync(groups, decide, abort_if)
     except MemcardError as e:
-        events.emit("error", f"{e.message} {e.hint or ''}".strip(), error=e.to_dict())
-        return []
+        events.emit("warning", f"{e.message} {e.hint or ''}".strip(), error=e.to_dict())
+    except Exception as e:  # noqa: BLE001 - logged with traceback; the game still launches
+        log.exception("sync failed")
+        err = MemcardError("Sync failed unexpectedly.", hint="See `memcard log` for details.", detail=repr(e))
+        events.emit("warning", err.message, error=err.to_dict())
+    return []
 
 
-def wrap(cfg: Config, dirs: Dirs, command: list[str], appid: int | None, events: Events, decide: Decider = no_decisions) -> int:
-    """Sync -> run the game -> wait for a full exit -> sync. Returns the game's exit code."""
+def wrap(cfg: Config, dirs: Dirs, command: list[str], appid: int | None, events: Events,
+         decide: Decider = no_decisions) -> tuple[int, dict]:
+    """Sync -> run the game -> wait for a full exit -> sync.
+
+    Returns the game's exit code and a report for the final ``result`` event.
+    """
+    if not command:
+        raise MemcardError("Nothing to launch.", hint="Use: memcard wrap -- %command%")
     appid = appid if appid is not None else appid_from_env()
     groups = cfg.groups_for_appid(appid) if appid is not None else []
     if not groups:
         events.emit("wrap_unmapped", f"No save groups mapped to appid {appid}; launching without sync.", appid=appid)
 
-    if groups:
-        events.emit("prelaunch", "Syncing saves before launch…", appid=appid, groups=[g.id for g in groups])
-        _sync(cfg, dirs, groups, events, decide, cfg.sync.launch_timeout_s)
-
+    # The marker goes up *before* the pre-launch sync, so a background sync
+    # that's mid-pass sees "game running" at its next safe point and stops.
     dirs.running.mkdir(parents=True, exist_ok=True)
     marker = dirs.running / str(os.getpid())
     marker.write_text(str(appid or ""))
+    before: list = []
     try:
+        if groups:
+            events.emit("prelaunch", "Syncing saves before launch…", appid=appid, groups=[g.id for g in groups])
+            before = _sync(cfg, dirs, groups, events, decide, cfg.sync.launch_timeout_s)
         code = _run_game(command)
     finally:
         marker.unlink(missing_ok=True)
 
+    after: list = []
     if groups:
         lower_priority()  # the player may be starting the next game already
         events.emit("postexit", "Game exited; waiting for saves to finish writing…", appid=appid)
         wait_until_settled(groups, cfg.sync.exit_settle_s)
-        _sync(cfg, dirs, groups, events, decide, None)
-    return code
+        after = _sync(cfg, dirs, groups, events, decide, None)
+    report = {
+        "appid": appid,
+        "exit_code": code,
+        "prelaunch": [r.to_dict() for r in before],
+        "postexit": [r.to_dict() for r in after],
+    }
+    return code, report
 
 
 def _run_game(command: list[str]) -> int:
-    if not command:
-        raise MemcardError("Nothing to launch.", hint="Use: memcard wrap -- %command%")
     proc = subprocess.Popen(command)
 
     def forward(signum, _frame):
@@ -161,7 +180,7 @@ def periodic(cfg: Config, dirs: Dirs, events: Events) -> list:
         events.emit("periodic_skipped", "A game is running; skipping background sync.")
         return []
     lower_priority()
-    return _sync(cfg, dirs, cfg.groups, events, no_decisions, None)
+    return _sync(cfg, dirs, cfg.groups, events, no_decisions, None, abort_if=lambda: game_running(cfg, dirs))
 
 
 # --- systemd user timer (a oneshot, not a resident process) --------------------

@@ -56,14 +56,20 @@ class Machine:
         return (self.saves / rel).read_bytes()
 
 
-@pytest.fixture
-def world(tmp_path):
+@pytest.fixture(params=["local", "webdav"])
+def world(request, tmp_path):
+    """Every engine test runs against the local backend and a real WebDAV server."""
     conf = tmp_path / "rclone.conf"
-    conf.write_text("[cloud]\ntype = local\n")
-    remote_dir = tmp_path / "cloud"
+    if request.param == "local":
+        conf.write_text("[cloud]\ntype = local\n")
+        folder = tmp_path / "cloud"
+    else:
+        url = request.getfixturevalue("webdav_url")
+        conf.write_text(f"[cloud]\ntype = webdav\nurl = {url}\nvendor = other\n")
+        folder = tmp_path.name  # unique per test on the shared server
 
     def make(name, **kw):
-        return Machine(tmp_path, name, conf, remote_dir, **kw)
+        return Machine(tmp_path, name, conf, folder, **kw)
 
     return make
 
@@ -274,3 +280,125 @@ def test_export_writes_plain_files(world, tmp_path):
     out = tmp_path / "export"
     assert deck.engine().export(deck.group, out) == ["gba/s.srm"]
     assert (out / "gba/s.srm").read_bytes() == b"x"
+
+
+# --- regressions from review of PR #1 -------------------------------------------
+
+
+def test_same_size_commits_all_land(world):
+    """HEAD.json files of equal length must still replace each other (WebDAV has no modtimes)."""
+    deck, pc = world("Deck"), world("PC")
+    for n in range(1, 4):
+        deck.write("s.srm", f"progress-{n}".encode())
+        assert deck.sync().pushed == ["s.srm"]
+    assert deck.engine().store.head("ra").generation == 3
+    assert deck.sync().pulled == []  # nothing rolls back
+    pc.sync()
+    assert pc.read("s.srm") == b"progress-3"
+
+
+def test_tampered_manifest_cannot_write_outside_the_group(world, tmp_path):
+    import json
+
+    deck, pc = world("Deck"), world("PC")
+    deck.write("s.srm", b"x")
+    deck.sync()
+    store = deck.engine().store
+    head = store.read_json("groups", "ra", "HEAD.json")
+    entry = next(iter(head["files"].values()))
+    head["files"]["../../escape.srm"] = entry
+    store.write_json(head, "groups", "ra", "HEAD.json")
+
+    r = pc.sync()
+    assert r.status == "error" and r.error.code == "remote_corrupt"
+    assert not list(tmp_path.rglob("escape.srm"))
+
+    head["files"] = {"s.srm": {**entry, "sha256": "../../../victim"}}
+    store.write_json(head, "groups", "ra", "HEAD.json")
+    victim = tmp_path / "victim"
+    victim.write_text("keep me")
+    assert pc.sync().error.code == "remote_corrupt"
+    assert victim.read_text() == "keep me"
+
+
+def test_unplugged_symlinked_folder_is_not_deleted_remotely(world, tmp_path):
+    deck, pc = world("Deck"), world("PC")
+    usb = tmp_path / "usb"
+    usb.mkdir()
+    (usb / "Emerald.srm").write_bytes(b"e")
+    (deck.saves / "gba").symlink_to(usb)
+    deck.write("Zelda.srm", b"z")
+    deck.sync()
+    usb.rename(tmp_path / "unplugged")  # the link now dangles
+    r = deck.sync()
+    assert r.status == "ok" and r.pushed == []
+    assert "gba/Emerald.srm" in deck.engine().store.head("ra").files
+    pc.sync()
+    assert pc.read("gba/Emerald.srm") == b"e"
+
+
+def test_save_written_after_the_scan_is_not_overwritten(world, monkeypatch):
+    deck, pc = world("Deck"), world("PC")
+    deck.write("s.srm", b"base")
+    deck.sync(), pc.sync()
+    deck.write("s.srm", b"deck")
+    deck.sync()
+
+    real_fetch = RemoteStore.fetch
+
+    def emulator_writes_meanwhile(self, shas):
+        (pc.saves / "s.srm").write_bytes(b"pc wrote this during the sync")
+        return real_fetch(self, shas)
+
+    monkeypatch.setattr(RemoteStore, "fetch", emulator_writes_meanwhile)
+    r = pc.sync()
+    monkeypatch.setattr(RemoteStore, "fetch", real_fetch)
+    assert r.status == "conflicts"  # replanned: both sides changed
+    assert pc.read("s.srm") == b"pc wrote this during the sync"
+
+
+def test_cancel_after_the_last_safe_point_still_restores_the_whole_unit(world, monkeypatch):
+    from memcard.store.trash import Trash
+    from memcard.transport.proc import CANCEL
+
+    deck, pc = world("Deck", unit="group"), world("PC", unit="group")
+    for i in range(4):
+        deck.write(f"card{i}.srm", b"old")
+    deck.sync(), pc.sync()
+    for i in range(4):
+        deck.write(f"card{i}.srm", b"new")
+    deck.sync()
+
+    real_put = Trash.put
+
+    def cancel_mid_restore(self, batch, src, rel):
+        CANCEL.set()  # SIGTERM arrives while the unit is being written
+        return real_put(self, batch, src, rel)
+
+    monkeypatch.setattr(Trash, "put", cancel_mid_restore)
+    try:
+        r = pc.sync()
+    finally:
+        CANCEL.clear()
+    assert r.status == "ok"
+    assert {pc.read(f"card{i}.srm") for i in range(4)} == {b"new"}, "never half a memory card"
+
+
+def test_background_sync_stops_at_a_safe_point_when_a_game_starts(world):
+    from memcard.errors import Cancelled
+
+    deck = world("Deck")
+    other = Group(id="other", root=deck.saves.parent / "other", include=["*.srm"])
+    other.root.mkdir()
+    (other.root / "o.srm").write_bytes(b"o")
+    deck.write("s.srm", b"s")
+    deck.cfg.groups.append(other)
+    calls = []
+
+    def game_started_after_first_group():
+        calls.append(1)
+        return len(calls) > 1
+
+    with pytest.raises(Cancelled):
+        deck.engine().sync([deck.group, other], engine_mod.no_decisions, abort_if=game_started_after_first_group)
+    assert deck.engine().store.head("other") is None

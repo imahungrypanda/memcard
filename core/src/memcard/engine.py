@@ -15,6 +15,7 @@ from __future__ import annotations
 import fcntl
 import json
 import logging
+import os
 import re
 import shutil
 import tempfile
@@ -28,9 +29,9 @@ from typing import Any
 
 from . import planner, providers, scan
 from .config import Config, Group
-from .errors import AuthError, LocalChanged, LocalPathMissing, MemcardError, Offline, RemoteChanged, Unreachable
+from .errors import AuthError, Cancelled, LocalChanged, LocalPathMissing, MemcardError, Offline, RemoteChanged, Unreachable
 from .events import Events, Silent
-from .model import FileEntry, GroupPlan, Manifest, Resolution, Snapshot, UnitPlan, utcnow
+from .model import FileEntry, GroupPlan, Manifest, Resolution, Snapshot, UnitPlan, check_relpath, utcnow
 from .paths import Dirs, atomic_write
 from .store import snapshot as snapshots
 from .store.remote import RemoteStore
@@ -83,37 +84,29 @@ class Engine:
         self.rclone = Rclone(remote.rclone_config or dirs.rclone_config, providers.get(remote.provider), self.deadline)
         self.store = RemoteStore(self.rclone, remote.spec, dirs.objects, dirs.staging, cfg.machine_id)
         self.trash = Trash(dirs.trash, cfg.sync.trash_versions)
+        self.abort_if: Callable[[], bool] | None = None
+        self._group_root = Path()
 
     # --- locking -------------------------------------------------------------
 
-    @contextmanager
     def lock(self, wait_s: float = 60):
-        """One sync at a time per machine (launch hook vs periodic vs a button press)."""
-        self.dirs.lock_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.dirs.lock_file, "w") as f:
-            give_up = time.monotonic() + wait_s
-            while True:
-                try:
-                    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    self.deadline.check()
-                    if time.monotonic() > give_up:
-                        raise MemcardError("Another Memcard sync is still running.", hint="Try again in a moment.")
-                    time.sleep(0.2)
-            try:
-                yield
-            finally:
-                fcntl.flock(f, fcntl.LOCK_UN)
+        return sync_lock(self.dirs, self.deadline, wait_s)
 
     # --- planning ------------------------------------------------------------------
 
     def plan(self, group: Group) -> tuple[GroupPlan, Manifest | None, Snapshot | None]:
-        local = scan.scan(group)
+        local, unknown = scan.scan(group)
+        if unknown:
+            self.events.emit(
+                "unreadable",
+                f"{group.id}: couldn't read {', '.join(unknown)} (unplugged drive or broken link?); left those alone.",
+                group=group.id,
+                paths=unknown,
+            )
         self.deadline.check()
         remote = self.store.head(group.id)
         snap = snapshots.load(self.dirs.snapshots, group.id)
-        return planner.plan_group(group, local, remote, snap), remote, snap
+        return planner.plan_group(group, local, remote, snap, unknown), remote, snap
 
     def status(self, groups: list[Group]) -> list[tuple[Group, GroupPlan | None, MemcardError | None]]:
         out = []
@@ -129,10 +122,18 @@ class Engine:
 
     # --- syncing ---------------------------------------------------------------------
 
-    def sync(self, groups: list[Group], decide: Decider = no_decisions) -> list[GroupResult]:
+    def sync(self, groups: list[Group], decide: Decider = no_decisions, abort_if: Callable[[], bool] | None = None) -> list[GroupResult]:
+        """``abort_if`` is polled at safe points (between groups, before any local
+        write); background syncs pass "a game started" so they get out of the way."""
+        self.abort_if = abort_if
         results: list[GroupResult] = []
         with self.lock():
             for i, g in enumerate(groups):
+                try:
+                    self._safe_point()
+                except Cancelled:
+                    self._record_pending(results)
+                    raise
                 self.events.emit("group_start", f"Syncing {g.label or g.id}…", group=g.id)
                 try:
                     r = self._sync_group(g, decide)
@@ -189,6 +190,7 @@ class Engine:
         machines = dict(remote.machines) if remote else {}
         machines.setdefault(self.cfg.machine_id, self.cfg.machine_name)
         decisions = decide(group, plan, machines) if plan.conflicts else {}
+        self._group_root = group.root
         actions, unresolved = planner.actions_for(group, plan, decisions, self._alt_name)
 
         result = GroupResult(group.id, "conflicts" if unresolved else "ok", conflicts=unresolved, machines=machines)
@@ -213,6 +215,11 @@ class Engine:
             snapshots.save(self.dirs.snapshots, Snapshot(group.id, generation, utcnow(), files))
         return result
 
+    def _safe_point(self) -> None:
+        self.deadline.check()
+        if self.abort_if and self.abort_if():
+            raise Cancelled("A game started, so background sync stopped.", hint="It'll run again later.")
+
     def _staging(self) -> Path:
         self.dirs.staging.mkdir(parents=True, exist_ok=True)
         return self.dirs.staging
@@ -223,9 +230,14 @@ class Engine:
         if not dot:
             stem, ext = name, ""
         who = re.sub(r"[^\w .-]", "", self.cfg.machine_name).strip() or "other"
-        when = datetime.now().strftime("%Y-%m-%d %H%M")
-        new = f"{stem} ({who} {when}){dot}{ext}"
-        return f"{head}/{new}" if head else new
+        when = datetime.now().strftime("%Y-%m-%d %H%M%S")
+        n = 1
+        while True:
+            new = f"{stem} ({who} {when}{f' #{n}' if n > 1 else ''}){dot}{ext}"
+            candidate = f"{head}/{new}" if head else new
+            if not os.path.lexists(self._group_root / candidate):
+                return candidate
+            n += 1
 
     # --- applying actions -------------------------------------------------------------
 
@@ -235,11 +247,14 @@ class Engine:
         for a in actions:
             if a.kind == "copy_local":
                 dest = rsync.real_destination(group.root, a.new_path)
+                if os.path.lexists(dest):
+                    raise LocalChanged(f"{a.new_path} appeared while syncing.")
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(group.root / a.path, dest)
+                _expect(dest, a.entry, a.path)
             elif a.kind == "stash_local":
                 kept = kept or self.trash.new_batch(group.id, kept=True)
-                self.trash.put(kept, group.root / a.path, a.path)
+                _expect(self.trash.put(kept, group.root / a.path, a.path), a.entry, a.path)
         if kept:
             self.events.emit("kept_alternate", f"Kept this machine's version in {kept.path}", group=group.id, path=str(kept.path))
 
@@ -283,11 +298,14 @@ class Engine:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(objects[a.entry.sha256], dest)
 
-        self.deadline.check()
+        self._safe_point()  # the last one: from here the unit is restored whole, never cut short
         batch = self.trash.new_batch(group.id)
         for a in pulls:
-            self.trash.put(batch, group.root / a.path, a.path)
-        rsync.restore(incoming, [a.path for a in writes], group.root, self.deadline)
+            # Verifying the trash copy proves both that the save is safe and
+            # that it hasn't changed since we planned (e.g. an emulator running
+            # outside `wrap` just wrote it). Changed -> replan, don't overwrite.
+            _expect(self.trash.put(batch, group.root / a.path, a.path), a.expect, a.path)
+        rsync.restore(incoming, [a.path for a in writes], group.root, None)
         for a in pulls:
             if a.entry is None:
                 link = group.root / a.path
@@ -319,9 +337,41 @@ class Engine:
         return sorted(manifest.files)
 
 
-def restore_from_trash(group: Group, batch_path: Path, rels: list[str], trash: Trash, deadline: Deadline | None = None) -> None:
+def _expect(copy: Path | None, expected: FileEntry | None, rel: str) -> None:
+    """The file we're about to replace must still be what the plan saw."""
+    actual = scan.sha256(copy) if copy else None
+    if actual != (expected.sha256 if expected else None):
+        raise LocalChanged(f"{rel} changed while syncing.")
+
+
+@contextmanager
+def sync_lock(dirs: Dirs, deadline: Deadline | None = None, wait_s: float = 60):
+    """One writer at a time per machine: syncs, gc and trash restores."""
+    dirs.lock_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(dirs.lock_file, "w") as f:
+        give_up = time.monotonic() + wait_s
+        while True:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if deadline:
+                    deadline.check()
+                if time.monotonic() > give_up:
+                    raise MemcardError("Another Memcard sync is still running.", hint="Try again in a moment.")
+                time.sleep(0.2)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def restore_from_trash(group: Group, batch_path: Path, rels: list[str], trash: Trash, dirs: Dirs) -> None:
     """Put trashed files back, trashing the current versions first."""
-    current = trash.new_batch(group.id)
     for rel in rels:
-        trash.put(current, group.root / rel, rel)
-    rsync.restore(batch_path, rels, group.root, deadline)
+        check_relpath(rel)
+    with sync_lock(dirs):
+        current = trash.new_batch(group.id)
+        for rel in rels:
+            trash.put(current, group.root / rel, rel)
+        rsync.restore(batch_path, rels, group.root, None)

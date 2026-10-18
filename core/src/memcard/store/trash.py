@@ -39,13 +39,14 @@ class Trash:
             name = f"{stamp}.{n}{suffix}"
         return Batch(group, name, base / name)
 
-    def put(self, batch: Batch, src: Path, rel: str) -> None:
+    def put(self, batch: Batch, src: Path, rel: str) -> Path | None:
         """Copy (never move) ``src``; follows symlinks so we keep the real save bytes."""
         if not src.exists():
-            return
+            return None
         dest = batch.path / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
+        return dest
 
     def batches(self, group: str | None = None) -> list[Batch]:
         groups = [group] if group else sorted(p.name for p in self.root.glob("*") if p.is_dir())
@@ -53,10 +54,17 @@ class Trash:
         for g in groups:
             d = self.root / g
             if d.is_dir():
-                out += [Batch(g, p.name, p) for p in sorted(d.iterdir()) if p.is_dir()]
+                out += [Batch(g, p.name, p) for p in sorted(d.iterdir(), key=_order) if p.is_dir()]
         return out
 
     def prune(self, group: str) -> None:
         normal = [b for b in self.batches(group) if not b.kept]
         for b in normal[: max(0, len(normal) - self.keep)]:
             shutil.rmtree(b.path, ignore_errors=True)
+
+
+def _order(p: Path) -> tuple[str, int]:
+    """Oldest first: "<stamp>", "<stamp>.2", ... "<stamp>.10" in numeric, not string, order."""
+    name = p.name.removesuffix(KEPT)
+    stamp, _, n = name.partition(".")
+    return stamp, int(n) if n.isdigit() else 1
