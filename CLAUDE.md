@@ -55,10 +55,12 @@ State locations come from `paths.Dirs` (XDG, or everything under `MEMCARD_HOME`)
 
 ```bash
 python3 -m pytest -q decky/tests                     # backend runner tests (any python with pytest)
+node --test decky/tests/launch.test.ts               # launch/exit state machine (Node >= 22.18, native TS)
 cd decky && npx -y pnpm@9 install && npx -y pnpm@9 run typecheck && npx -y pnpm@9 run build
 scripts/build-decky.sh                               # -> dist/memcard-decky.zip (bundles dist/memcard as bin/memcard)
 ```
 
 - **Backend** (`main.py` → `py_modules/memcard_decky/runner.py`). It runs `bin/memcard --json …` with the **system** `/usr/bin/python3` and an env stripped of Decky's PyInstaller leaks (`LD_LIBRARY_PATH`, `PYTHONHOME`, …). Subcommands are allowlisted (no `wrap`, `timer`, `gc`). Secrets go on stdin. There's no `root` flag, so it runs as `deck` and shares config/state with a Desktop Mode terminal.
-- **Launch hook** (`src/launch.ts`). For a mapped appid, Steam's `GameActionStart` is cancelled synchronously, then: `sync --before-launch --launch-id X` → conflict modal (`src/conflicts.tsx`) → `sync --resolve …` → `RunGame`, letting that launch through once. On `RegisterForAppLifetimeNotifications` with `bRunning=false`, it runs `sync --after-exit --launch-id X`. It falls back to the last-launched appid when Steam reports `unAppID` 0. Shortcut launch options are never edited.
+- **Launch hook.** The state machine is `src/launchController.ts`, pure and dependency-injected, with unit tests in `tests/launch.test.ts`. Keep it free of `@decky/*` imports so Node can run it. `src/launch.ts` only wires it to Steam and the UI. For a mapped appid that isn't already running or mid-sync, `GameActionStart` is cancelled synchronously, then: `sync --before-launch --launch-id X` → conflict modal (`src/conflicts.tsx`) → the same hook again with `--resolve …` → `RunGame`, let through once within 10 s. Every session gets exactly one `--after-exit --launch-id X`: on its own `bRunning=false` (matched by instance), or from a watchdog if the relaunch never starts. It falls back to the last-launched appid when Steam reports `unAppID` 0. Shortcut launch options are never edited.
+- **No manual sync during a game.** Core refuses a plain `sync` while a launch is marked or a mapped emulator's Flatpak is up (`GameRunning`), and the panel disables its sync buttons. Only the launch hooks sync around games.
 - **Steam APIs** (`SteamClient.*`, `appStore`) are only typed by `@decky/ui`, not verified on a device. Anything new built on them belongs in the hardware checklist in `docs/install.md` §8.

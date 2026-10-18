@@ -370,6 +370,9 @@ cloud, with EmuDeck-shaped symlinks. These parts need your hardware:
 - [ ] After quitting, a "Saves synced" toast appears, and `memcard log` shows `postexit`.
       (If no toast appears, Steam may report appid 0 for shortcuts; tell me.)
 - [ ] An unmapped game and a regular Steam game launch exactly as before, with no delay.
+- [ ] Pressing Play twice quickly gives a "Still syncing saves…" toast and one launch, not two.
+- [ ] Resuming a running game from the library doesn't sync or cancel anything.
+- [ ] While a game runs, the panel's Sync now is greyed out with a note.
 - [ ] Find EmuDeck saves → Add maps your shortcuts. Check what would sync and Sync now
       show sensible results.
 
