@@ -208,6 +208,15 @@ def cmd_setup_apply(ctx: Ctx) -> int:
     return _connect(ctx, req["name"], req.get("folder", "memcard"), p, None)
 
 
+def cmd_setup_install_rclone(ctx: Ctx) -> int:
+    from .install import install_rclone
+
+    ctx.events.emit("progress", "Downloading rclone and checking its checksum…")
+    info = install_rclone(ctx.dirs)
+    ctx.out(info, f"Installed rclone {info['version']} to {info['path']}")
+    return 0
+
+
 def cmd_setup_use(ctx: Ctx) -> int:
     from .setup import existing_remotes
 
@@ -581,6 +590,8 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--provider", required=True)
     v.set_defaults(fn=cmd_setup_validate)
     ssub.add_parser("apply", help="create/update a remote from JSON on stdin", parents=[common]).set_defaults(fn=cmd_setup_apply)
+    ssub.add_parser("install-rclone", help="download rclone (checksum-verified) into Memcard's data dir",
+                    parents=[common]).set_defaults(fn=cmd_setup_install_rclone)
     u = ssub.add_parser("use", help="use an existing rclone remote", parents=[common])
     u.add_argument("name")
     u.add_argument("--folder", default="memcard")
