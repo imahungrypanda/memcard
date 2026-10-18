@@ -20,3 +20,27 @@ jobs:
           curl -fsSL https://rclone.org/install.sh | sudo bash
       - run: pip install -e '.[dev]'
       - run: pytest -q
+
+  decky:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24  # runs the .ts launch-controller tests natively (type stripping)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pytest
+      - name: Backend tests
+        run: python -m pytest -q decky/tests
+      - name: Launch controller tests
+        run: node --test decky/tests/launch.test.ts
+      - name: Typecheck and build
+        working-directory: decky
+        run: |
+          npx -y pnpm@9 install --frozen-lockfile
+          npx -y pnpm@9 run typecheck
+          npx -y pnpm@9 run build
+      - name: Package
+        run: scripts/build-decky.sh

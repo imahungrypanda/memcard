@@ -13,7 +13,7 @@ from ..errors import Cancelled, ToolMissing
 
 _HINTS = {
     "rsync": "rsync ships with SteamOS and Bazzite. Set MEMCARD_RSYNC to its path if it lives somewhere unusual.",
-    "rclone": "Download the static rclone binary into ~/.local/bin (see docs/install.md), or set MEMCARD_RCLONE.",
+    "rclone": "Run `memcard setup install-rclone` (or use the Install rclone button in the Decky plugin), or set MEMCARD_RCLONE.",
 }
 
 
@@ -22,12 +22,18 @@ def find_tool(name: str) -> str:
     override = os.environ.get(f"MEMCARD_{name.upper()}")
     if override:
         return override
+    from ..paths import Dirs
+
+    # Memcard's own copy (from `setup install-rclone`) wins, so updating it takes effect.
+    own = Dirs.resolve().data / "bin" / name
+    if own.is_file() and os.access(own, os.X_OK):
+        return str(own)
     found = shutil.which(name)
     if found:
         return found
-    for d in (Path.home() / ".local/bin", Path.home() / ".local/share/memcard/bin"):
-        if (d / name).is_file() and os.access(d / name, os.X_OK):
-            return str(d / name)
+    local = Path.home() / ".local/bin" / name  # Steam launches games with a minimal PATH
+    if local.is_file() and os.access(local, os.X_OK):
+        return str(local)
     raise ToolMissing(f"{name} isn't installed.", hint=_HINTS.get(name))
 
 

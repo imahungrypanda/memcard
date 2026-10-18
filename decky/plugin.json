@@ -1,0 +1,11 @@
+{
+  "name": "Memcard",
+  "author": "imahungrypanda",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["saves", "sync", "emulation"],
+    "description": "Two-way save sync for emulators and games, backed by your own cloud storage. Syncs before launch and after exit, and asks before overwriting anything.",
+    "image": "https://opengraph.githubassets.com/1/imahungrypanda/memcard"
+  }
+}

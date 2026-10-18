@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from .errors import ConfigError, RemoteError
+from .errors import ConfigError, RemoteError, RemoteExists
 from .providers import Provider, detect
 from .transport.rclone import Rclone
 
@@ -82,7 +82,7 @@ def save_remote(own_config: Path, provider: Provider, name: str, values: dict[st
         ini.read(own_config)
     exists = ini.has_section(name)
     if exists and not update:
-        raise ConfigError(f"A remote called {name!r} already exists.", hint="Pick another name, or choose to update it.")
+        raise RemoteExists(f"A remote called {name!r} already exists.", hint="Pick another name, or choose to update it.")
     if update and not exists:
         raise ConfigError(f"There's no remote called {name!r} to update.", hint="Create it instead.")
 

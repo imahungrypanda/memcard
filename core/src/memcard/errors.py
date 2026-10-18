@@ -44,6 +44,16 @@ class Cancelled(MemcardError):
     code = "cancelled"
 
 
+class GameRunning(MemcardError):
+    """A manual sync was asked for while a game is running; its saves are off limits."""
+
+    code = "game_running"
+
+
+class RemoteExists(ConfigError):
+    code = "remote_exists"
+
+
 class LocalPathMissing(MemcardError):
     code = "local_path_missing"
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Memcard: two-way game save sync for Linux (Steam Deck/SteamOS + Bazzite desktop) over the user's own cloud via rclone. Replaces Ludusavi for EmuDeck emulator saves. Three deliverables share one core: `core/` (Python library + `memcard` CLI, **built**), `decky/` (Steam Deck Game Mode plugin, not started), `gui/` (Flatpak desktop app, not started). Full design and as-built deviations: `docs/design.md` (§8). Plan/progress: `tasks/todo.md`.
+Memcard: two-way game save sync for Linux (Steam Deck/SteamOS + Bazzite desktop) over the user's own cloud via rclone. Replaces Ludusavi for EmuDeck emulator saves. Three deliverables share one core: `core/` (Python library + `memcard` CLI), `decky/` (Steam Deck Game Mode plugin), `gui/` (Flatpak desktop app, not started). Full design and as-built deviations: `docs/design.md` (§8). Plan/progress: `tasks/todo.md`.
 
 **Rule:** all sync logic lives in `core/`. The UIs only drive the CLI with `--json` and render its events. If a behavior can only be exercised through a UI, it's in the wrong place.
 
@@ -23,6 +23,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'   # first time
 ```
 
 - Integration tests (`pytestmark = pytest.mark.integration`) shell out to real **GNU rsync** and **rclone**. Engine tests run twice: against the `local` backend and against a real WebDAV server (`webdav_url` fixture, `rclone serve webdav`). The local backend has nanosecond modtimes and hides size-only comparison bugs, so new remote-facing tests should use both. They auto-skip when either is missing (`tests/conftest.py`). On macOS `/usr/bin/rsync` is openrsync, so use `brew install rsync rclone`. Linux CI (`.github/workflows/ci.yml`, Python 3.11 + 3.13) is authoritative.
+- In a git worktree, the venv's editable install still points at the main checkout's `core/src`; run tests with `PYTHONPATH=src` from the worktree's `core/`.
 - An autouse fixture runs every test in a temp cwd with its own `MEMCARD_HOME`. Keep it that way: tests must never write into the repo or `~`.
 - No linter is configured.
 - Target Python ≥ 3.11 (stdlib `tomllib`). Hot paths (`wrap`, `sync`, `status`) must stay stdlib-only. `tomlkit` is imported lazily, only when writing config.
@@ -49,3 +50,17 @@ Pipeline per save group: `scan` (hash local) → `store.remote.head` (remote man
 - **`detect.py` + `vdf.py`** scaffold groups from EmuDeck `Emulation/saves/<emu>/<sub>` (known emulators get `unit`/Flatpak id) and map Steam `shortcuts.vdf` entries to groups by which emulator the shortcut's command launches.
 
 State locations come from `paths.Dirs` (XDG, or everything under `MEMCARD_HOME`).
+
+## Decky plugin (decky/)
+
+```bash
+python3 -m pytest -q decky/tests                     # backend runner tests (any python with pytest)
+node --test decky/tests/launch.test.ts               # launch/exit state machine (Node >= 22.18, native TS)
+cd decky && npx -y pnpm@9 install && npx -y pnpm@9 run typecheck && npx -y pnpm@9 run build
+scripts/build-decky.sh                               # -> dist/memcard-decky.zip (bundles dist/memcard as bin/memcard)
+```
+
+- **Backend** (`main.py` → `py_modules/memcard_decky/runner.py`). It runs `bin/memcard --json …` with the **system** `/usr/bin/python3` and an env stripped of Decky's PyInstaller leaks (`LD_LIBRARY_PATH`, `PYTHONHOME`, …). Subcommands are allowlisted (no `wrap`, `timer`, `gc`). Secrets go on stdin. There's no `root` flag, so it runs as `deck` and shares config/state with a Desktop Mode terminal.
+- **Launch hook.** The state machine is `src/launchController.ts`, pure and dependency-injected, with unit tests in `tests/launch.test.ts`. Keep it free of `@decky/*` imports so Node can run it. `src/launch.ts` only wires it to Steam and the UI. For a mapped appid that isn't already running or mid-sync, `GameActionStart` is cancelled synchronously, then: `sync --before-launch --launch-id X` → conflict modal (`src/conflicts.tsx`) → the same hook again with `--resolve …` → `RunGame`, let through once within 10 s. Every session gets exactly one `--after-exit --launch-id X`: on its own `bRunning=false` (matched by instance), or from a watchdog if the relaunch never starts. It falls back to the last-launched appid when Steam reports `unAppID` 0. State lost to a plugin reload is recovered: running games are seeded from `Router.RunningApps`, and a mapped game exiting with no session gets an id-less `--after-exit` (duplicates of an already-handled exit are ignored by instance id). Shortcut launch options are never edited.
+- **No manual sync during a game.** Core refuses a plain `sync` while a launch is marked or a mapped emulator's Flatpak is up (`GameRunning`), and the panel disables its sync buttons. Only the launch hooks sync around games.
+- **Steam APIs** (`SteamClient.*`, `appStore`) are only typed by `@decky/ui`, not verified on a device. Anything new built on them belongs in the hardware checklist in `docs/install.md` §8.

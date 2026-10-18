@@ -38,15 +38,15 @@ launch options, and `%command%` expansion for shortcuts is unverified. `wrap` st
 - [x] Tests + docs (CLAUDE.md, design §8)
 
 ### 2b. Plugin (PR: feat/decky, stacked on 2a)
-- [ ] Scaffold from decky-plugin-template (@decky/ui, @decky/api, @decky/rollup, pnpm 9); no root flag
-- [ ] Backend main.py: run bundled `bin/memcard` with system python3, clean env, allowlisted subcommands,
+- [x] Scaffold from decky-plugin-template (@decky/ui, @decky/api, @decky/rollup, pnpm 9); no root flag
+- [x] Backend main.py: run bundled `bin/memcard` with system python3, clean env, allowlisted subcommands,
       stream NDJSON events via decky.emit, cancel with SIGTERM; install rclone (sha256-verified) on request
-- [ ] Launch interceptor: GameActionStart → mapped appid? cancel → before-launch sync → conflict modal → relaunch (one-shot skip)
-- [ ] Exit: lifetime notification (appid fallback: last launched) → after-exit sync → toast
-- [ ] QAM panel: status, Sync now, pending conflicts → resolve modal, auto-sync toggle, detect saves
-- [ ] Setup wizard: existing remotes, provider fields one at a time, validate, apply, OAuth token paste/file, mapped errors
-- [ ] Build script → installable zip (bundles the memcard zipapp); backend unit tests; tsc + rollup build in CI
-- [ ] docs/install.md: Deck section uses the plugin
+- [x] Launch interceptor: GameActionStart → mapped appid? cancel → before-launch sync → conflict modal → relaunch (one-shot skip)
+- [x] Exit: lifetime notification (appid fallback: last launched) → after-exit sync → toast
+- [x] QAM panel: status, Sync now, pending conflicts → resolve modal, auto-sync toggle, detect saves
+- [x] Setup wizard: existing remotes, provider fields one at a time, validate, apply, OAuth token paste/file, mapped errors
+- [x] Build script → installable zip (bundles the memcard zipapp); backend unit tests; tsc + rollup build in CI
+- [x] docs/install.md: Deck section uses the plugin
 
 ## Phase 3 — memcard-gui
 - [ ] Pick GTK4 vs Qt; Flatpak manifest with rsync + rclone bundled

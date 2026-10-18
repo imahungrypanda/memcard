@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__, config, log as logsetup, providers
-from .errors import Cancelled, ConfigError, ConflictsPending, MemcardError
+from .errors import Cancelled, ConfigError, ConflictsPending, GameRunning, MemcardError
 from .events import Events
 from .model import GroupPlan, Resolution, UnitPlan
 from .paths import Dirs, in_game_mode
@@ -206,6 +206,15 @@ def cmd_setup_apply(ctx: Ctx) -> int:
     p = _provider(req["provider"])
     save_remote(ctx.dirs.rclone_config, p, req["name"], req.get("values", {}), update=bool(req.get("update")))
     return _connect(ctx, req["name"], req.get("folder", "memcard"), p, None)
+
+
+def cmd_setup_install_rclone(ctx: Ctx) -> int:
+    from .install import install_rclone
+
+    ctx.events.emit("progress", "Downloading rclone and checking its checksum…")
+    info = install_rclone(ctx.dirs)
+    ctx.out(info, f"Installed rclone {info['version']} to {info['path']}")
+    return 0
 
 
 def cmd_setup_use(ctx: Ctx) -> int:
@@ -445,6 +454,14 @@ def cmd_sync(ctx: Ctx) -> int:
     elif a.after_exit:
         results = triggers.after_exit(ctx.cfg, ctx.dirs, a.appid, a.launch_id, ctx.events, decide)
     else:
+        # A manual sync could restore files under a running emulator, which then
+        # overwrites them (or pushes a half-flushed save). The launch hooks own
+        # syncing around games; this waits until the game is over.
+        if triggers.game_running(ctx.cfg, ctx.dirs):
+            raise GameRunning(
+                "A game is running, so Memcard won't touch saves right now.",
+                hint="Sync after you quit the game; it also happens automatically on exit.",
+            )
         results = _engine(ctx).sync(ctx.groups(a.groups, a.appid), decide)
     stale = results is None
     results = results or []
@@ -581,6 +598,8 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--provider", required=True)
     v.set_defaults(fn=cmd_setup_validate)
     ssub.add_parser("apply", help="create/update a remote from JSON on stdin", parents=[common]).set_defaults(fn=cmd_setup_apply)
+    ssub.add_parser("install-rclone", help="download rclone (checksum-verified) into Memcard's data dir",
+                    parents=[common]).set_defaults(fn=cmd_setup_install_rclone)
     u = ssub.add_parser("use", help="use an existing rclone remote", parents=[common])
     u.add_argument("name")
     u.add_argument("--folder", default="memcard")
