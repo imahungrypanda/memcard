@@ -223,3 +223,30 @@ def test_validate_reads_values_from_stdin_and_never_logs_them(machine, monkeypat
     assert run("--json", "setup", "validate", "--provider", "nextcloud", stdin=values, monkeypatch=monkeypatch) == 4
     assert "file endpoint" in result(events(capsys))["problems"]["url"]
     assert "hunter2-secret" not in Dirs.resolve().log_file.read_text()
+
+
+def test_skipping_the_prelaunch_sync_still_pushes_after_the_game(machine, monkeypatch):
+    """A SIGTERM/skip during the pre-launch sync must not cancel the post-exit push."""
+    from memcard import config, engine
+    from memcard.transport.proc import CANCEL
+
+    (machine / "fr.srm").write_bytes(b"v1")
+    run("sync")
+    real_sync = engine.Engine.sync
+    calls = []
+
+    def skipped_first(self, *a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            CANCEL.set()  # the UI's "skip" arrives during the pre-launch sync
+        return real_sync(self, *a, **k)
+
+    monkeypatch.setattr(engine.Engine, "sync", skipped_first)
+    game = [sys.executable, "-c", f"open({str(machine / 'fr.srm')!r}, 'wb').write(b'v2-played')"]
+    try:
+        assert run("wrap", "--appid", "4242", "--", *game) == 0
+    finally:
+        CANCEL.clear()
+    d = Dirs.resolve()
+    head = engine.Engine(config.load(d.config_file), d).store.head("retroarch")
+    assert head.files["fr.srm"].size == len(b"v2-played")

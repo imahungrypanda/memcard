@@ -21,7 +21,7 @@ from .engine import Decider, Engine, no_decisions
 from .errors import LocalPathMissing, MemcardError
 from .events import Events
 from .paths import Dirs
-from .transport.proc import Deadline, lower_priority
+from .transport.proc import CANCEL, Deadline, lower_priority
 
 log = logging.getLogger(__name__)
 
@@ -138,6 +138,9 @@ def wrap(cfg: Config, dirs: Dirs, command: list[str], appid: int | None, events:
         if groups:
             events.emit("prelaunch", "Syncing saves before launch…", appid=appid, groups=[g.id for g in groups])
             before = _sync(cfg, dirs, groups, events, decide, cfg.sync.launch_timeout_s)
+        # A cancel during the pre-launch sync means "skip it and play". It must
+        # not carry over and cancel the post-exit push of this session's saves.
+        CANCEL.clear()
         code = _run_game(command)
     finally:
         marker.unlink(missing_ok=True)
