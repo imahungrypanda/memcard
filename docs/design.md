@@ -290,6 +290,8 @@ memcard detect [--emudeck PATH] [--write]
 memcard status [GROUP…]              per-unit verdicts without changing anything
 memcard sync [GROUP…] [--resolve GROUP[:UNIT]=local|remote|both] [--non-interactive] [--periodic]
 memcard wrap [--appid N] -- CMD…     Steam launch-option wrapper (appid defaults to SteamGameId)
+memcard groups                       groups + appids + pending conflicts, offline (a UI's mapping source)
+memcard sync --appid N --before-launch|--after-exit    launch hooks for a UI that controls the launch (Decky)
 memcard trash list|restore
 memcard gc
 memcard export GROUP DIR [--generation N]
@@ -414,5 +416,6 @@ snapshot on the remote would only add "which machines are behind" reporting; I'd
 | (new) | Dangling symlinks and unreadable folders are reported as *unknown*; the planner leaves those paths alone on every side | An unplugged drive behind a symlink must not look like deleted saves |
 | Deadline covers the whole sync | The last safe point is right before a local restore; from there the unit is written whole. SIGTERM sets a cancel flag checked at safe points. | A timeout or cancel mid-restore would have left half a memory card, and `wrap` would launch the game on it |
 | (new) | Before overwriting, each pull verifies the trash copy still matches the planned local state, or replans | A save written after the scan (an emulator running outside `wrap`) would otherwise be lost |
+| D3: Decky installs `memcard wrap` into launch options | The Decky plugin intercepts Steam's launch (cancel → `sync --before-launch` → relaunch) and runs `sync --after-exit` on Steam's exit event; `wrap` stays for Bazzite and manual use | Steam ROM Manager rewrites shortcut launch options on every parse, and `%command%` expansion for shortcuts is unverified. Intercepting leaves shortcuts untouched and gives the conflict prompt a real modal. UI launches use `running/app-<appid>` markers (12 h expiry) so periodic sync still backs off. |
 | Config editing via tomlkit | Reading is stdlib `tomllib`; tomlkit is imported only when writing | Hot paths (`wrap`, `sync`) stay stdlib-only |
 | (new) | Ships as one ~100 KB zipapp (`scripts/build-zipapp.sh`) | Nothing to install on an immutable OS |
