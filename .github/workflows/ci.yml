@@ -1,0 +1,22 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.13"]
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install rsync and rclone
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq rsync
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+      - run: pip install -e '.[dev]'
+      - run: pytest -q
