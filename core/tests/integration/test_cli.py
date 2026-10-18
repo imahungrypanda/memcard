@@ -250,3 +250,161 @@ def test_skipping_the_prelaunch_sync_still_pushes_after_the_game(machine, monkey
     d = Dirs.resolve()
     head = engine.Engine(config.load(d.config_file), d).store.head("retroarch")
     assert head.files["fr.srm"].size == len(b"v2-played")
+
+
+# --- hooks for UIs that control the launch themselves (the Decky plugin) -------
+
+
+def test_groups_lists_mapping_without_network(machine, capsys):
+    capsys.readouterr()
+    assert run("--json", "groups") == 0
+    data = result(events(capsys))
+    assert data["machine"]["name"] == "Deck"
+    assert data["remote"]["spec"].startswith("cloud:")
+    assert data["groups"][0]["id"] == "retroarch" and data["groups"][0]["appids"] == [4242]
+    assert data["pending"] == {}
+
+
+def test_before_launch_then_after_exit(machine, capsys, monkeypatch):
+    from memcard import config, triggers
+    from memcard.engine import Engine
+
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    d = Dirs.resolve()
+    (machine / "fr.srm").write_bytes(b"before")
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "4242", "--before-launch") == 0
+    data = result(events(capsys))
+    assert data["mapped"] and data["results"][0]["pushed"] == ["fr.srm"]
+    assert (d.running / "app-4242").exists()
+    assert triggers.game_running(config.load(d.config_file), d), "background sync must back off while it plays"
+
+    (machine / "fr.srm").write_bytes(b"played!")  # the game saves
+    assert run("--json", "sync", "--appid", "4242", "--after-exit") == 0
+    evts = events(capsys)
+    assert any(e["event"] == "postexit" for e in evts)
+    assert result(evts)["results"][0]["pushed"] == ["fr.srm"]
+    assert not (d.running / "app-4242").exists()
+    head = Engine(config.load(d.config_file), d).store.head("retroarch")
+    assert head.files["fr.srm"].size == len(b"played!")
+
+
+def test_unmapped_appid_is_a_quiet_no_op(machine, capsys):
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "1", "--before-launch") == 0
+    data = result(events(capsys))
+    assert data["results"] == [] and data["mapped"] is False and data["launch_id"]
+    assert run("--json", "sync", "--appid", "1", "--after-exit") == 0
+    assert not (Dirs.resolve().running / "app-1").exists()
+
+
+def test_launch_hooks_need_an_appid(machine):
+    assert run("sync", "--before-launch") == 4
+
+
+def test_status_by_appid(machine, capsys):
+    (machine / "fr.srm").write_bytes(b"x")
+    capsys.readouterr()
+    assert run("--json", "status", "--appid", "4242") == 0
+    assert [p["group"] for p in result(events(capsys))] == ["retroarch"]
+    assert run("--json", "status", "--appid", "1") == 0
+    assert result(events(capsys)) == []
+
+
+def test_late_exit_from_an_earlier_launch_is_ignored(machine, capsys, monkeypatch):
+    """before(A) → after(A) → before(B) → a duplicate after(A) must not touch launch B."""
+    from memcard import triggers
+
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    marker = Dirs.resolve().running / "app-4242"
+    run("sync", "--appid", "4242", "--before-launch", "--launch-id", "A")
+    run("sync", "--appid", "4242", "--after-exit", "--launch-id", "A")
+    run("sync", "--appid", "4242", "--before-launch", "--launch-id", "B")
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "4242", "--after-exit", "--launch-id", "A") == 0
+    evts = events(capsys)
+    assert result(evts) == {"results": [], "appid": 4242, "mapped": True, "stale": True}
+    assert not any(e["event"] == "postexit" for e in evts), "a stale exit must not settle or sync"
+    assert marker.read_text() == "B"
+    assert run("sync", "--appid", "4242", "--after-exit", "--launch-id", "B") == 0
+    assert not marker.exists()
+
+
+def test_after_exit_sync_stops_if_another_game_launches_meanwhile(machine, capsys, monkeypatch):
+    from memcard import triggers
+
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    run("sync", "--appid", "4242", "--before-launch", "--launch-id", "A")
+    (machine / "fr.srm").write_bytes(b"played")
+    real_settle = triggers._settle
+
+    def next_game_starts(groups, cfg, events, appid):
+        real_settle(groups, cfg, events, appid)
+        triggers.mark_app_running(Dirs.resolve(), 777, "other")
+
+    monkeypatch.setattr(triggers, "_settle", next_game_starts)
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "4242", "--after-exit", "--launch-id", "A") != 0
+    assert events(capsys)[-1]["error"]["code"] == "cancelled"
+
+
+def test_conflict_resolved_after_before_launch_keeps_the_launch_marked(machine, tmp_path, capsys, monkeypatch):
+    from memcard import config
+    from memcard.engine import Engine
+
+    d = Dirs.resolve()
+    (machine / "fr.srm").write_bytes(b"base")
+    run("sync")
+    eng = Engine(config.load(d.config_file), d)
+    head = eng.store.head("retroarch")
+    other = tmp_path / "other.srm"
+    other.write_bytes(b"from the pc")
+    from memcard.model import FileEntry
+    from memcard.scan import sha256
+
+    eng.store.upload({sha256(other): other})
+    head.files["fr.srm"] = FileEntry(sha256(other), other.stat().st_size, None, "id-pc", "t")
+    head.machines["id-pc"] = "PC"
+    head.parent, head.generation = head.generation, head.generation + 1
+    eng.store.commit(head)
+    (machine / "fr.srm").write_bytes(b"from the deck")
+
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "4242", "--before-launch", "--launch-id", "A") == 2
+    assert "retroarch" in json.loads((d.state / "pending.json").read_text())
+    assert run("--json", "groups") == 0
+    assert result(events(capsys))["pending"]["retroarch"]["units"] == ["fr.srm"]
+    assert run("sync", "--appid", "4242", "--resolve", "retroarch:fr.srm=remote") == 0
+    assert (machine / "fr.srm").read_bytes() == b"from the pc"
+    assert (d.running / "app-4242").read_text() == "A", "still playing: the marker stays until after-exit"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("sync", "retroarch", "--appid", "4242"),
+        ("status", "retroarch", "--appid", "4242"),
+        ("sync", "retroarch", "--appid", "4242", "--before-launch"),
+        ("sync", "--periodic", "--appid", "4242"),
+        ("sync", "--launch-id", "A"),
+        ("sync", "--appid", "4242", "--before-launch", "--launch-id", "../x"),
+    ],
+)
+def test_contradictory_flags_are_config_errors(machine, argv):
+    assert run(*argv) == 4
+
+
+def test_leftover_marker_from_a_lost_exit_doesnt_block_the_next_push(machine, capsys, monkeypatch):
+    """Game 999's exit was never reported; playing 4242 afterwards must still push."""
+    from memcard import config, triggers
+    from memcard.engine import Engine
+
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    run("sync", "--appid", "999", "--before-launch", "--launch-id", "lost")
+    run("sync", "--appid", "4242", "--before-launch", "--launch-id", "a")
+    (machine / "fr.srm").write_bytes(b"played")
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "4242", "--after-exit", "--launch-id", "a") == 0
+    assert result(events(capsys))["results"][0]["pushed"] == ["fr.srm"]
+    d = Dirs.resolve()
+    assert Engine(config.load(d.config_file), d).store.head("retroarch").files["fr.srm"].size == len(b"played")

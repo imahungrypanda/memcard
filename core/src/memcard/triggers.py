@@ -54,16 +54,48 @@ def _alive(pid: int) -> bool:
         return True
 
 
-def game_running(cfg: Config, dirs: Dirs) -> bool:
-    """A wrapped game is running, or any mapped emulator is (launched some other way)."""
-    wrapped = False
+# A launch started by a UI (`sync --before-launch`) has no process of ours to
+# watch, so its marker expires instead; `--after-exit` removes it normally.
+APP_MARKER_TTL_S = 12 * 3600
+
+
+def _app_marker(dirs: Dirs, appid: int) -> Path:
+    return dirs.running / f"app-{appid}"
+
+
+def mark_app_running(dirs: Dirs, appid: int, launch_id: str) -> None:
+    dirs.running.mkdir(parents=True, exist_ok=True)
+    _app_marker(dirs, appid).write_text(launch_id)
+
+
+def live_markers(dirs: Dirs) -> dict[str, int]:
+    """Launches Memcard knows about (wrap's pid, or a UI's app marker), by name -> mtime_ns.
+    Cleans up stale ones as it goes."""
+    live: dict[str, int] = {}
     if dirs.running.is_dir():
+        now = time.time()
         for marker in dirs.running.iterdir():
-            if marker.name.isdigit() and _alive(int(marker.name)):
-                wrapped = True
-            else:
-                marker.unlink(missing_ok=True)  # stale: wrapper was killed
-    if wrapped:
+            try:
+                st = marker.stat()
+                if marker.name.isdigit() and _alive(int(marker.name)):
+                    live[marker.name] = st.st_mtime_ns
+                    continue
+                if marker.name.startswith("app-") and now - st.st_mtime < APP_MARKER_TTL_S:
+                    live[marker.name] = st.st_mtime_ns
+                    continue
+            except FileNotFoundError:
+                continue  # removed by an --after-exit while we looked
+            marker.unlink(missing_ok=True)  # stale: wrapper killed, or exit never reported
+    return live
+
+
+def marked_running(dirs: Dirs) -> bool:
+    return bool(live_markers(dirs))
+
+
+def game_running(cfg: Config, dirs: Dirs) -> bool:
+    """A game launched through Memcard (wrap or a UI) is running, or a mapped emulator is."""
+    if marked_running(dirs):
         return True
     emulators = {g.emulator for g in cfg.groups if g.emulator}
     return bool(emulators & running_flatpaks())
@@ -115,6 +147,64 @@ def _sync(cfg: Config, dirs: Dirs, groups: list[Group], events: Events, decide: 
     return []
 
 
+def before_launch(cfg: Config, dirs: Dirs, appid: int, launch_id: str, events: Events,
+                  decide: Decider = no_decisions) -> list:
+    """Pre-launch sync for a launch a UI controls (the Decky plugin intercepts Steam's).
+
+    Unlike ``wrap`` this raises on failure: the caller decides whether to
+    launch anyway. It's bounded by launch_timeout_s either way. The caller
+    passes the same ``launch_id`` to ``after_exit``.
+    """
+    groups = cfg.groups_for_appid(appid)
+    mark_app_running(dirs, appid, launch_id)  # before syncing, so a background pass backs off
+    if not groups:
+        return []
+    events.emit("prelaunch", "Syncing saves before launch…", appid=appid, groups=[g.id for g in groups])
+    return Engine(cfg, dirs, events, Deadline(cfg.sync.launch_timeout_s)).sync(groups, decide)
+
+
+def after_exit(cfg: Config, dirs: Dirs, appid: int, launch_id: str | None, events: Events,
+               decide: Decider = no_decisions) -> list | None:
+    """Post-exit push for a launch a UI controls: idle priority, wait for writes to settle, sync.
+
+    Returns None for a stale exit: one whose ``launch_id`` isn't the current
+    launch of this app (a late or duplicate notification after a relaunch).
+    Acting on it would clear the running game's marker and sync under it.
+    """
+    marker = _app_marker(dirs, appid)
+    try:
+        current = marker.read_text()
+    except FileNotFoundError:
+        current = None
+    if launch_id is not None and current is not None and current != launch_id:
+        events.emit("stale_exit", "Ignored an exit report from an earlier launch.", appid=appid)
+        return None
+    marker.unlink(missing_ok=True)
+    groups = cfg.groups_for_appid(appid)
+    if not groups:
+        return []
+    # Stop at a safe point if a game is launched while this runs, but only a
+    # launch that's new (or relaunched) since now: a leftover marker from a
+    # session whose exit was never reported mustn't block this push. Markers
+    # only, not running Flatpaks: a slow-to-quit emulator mustn't block its own push.
+    before = live_markers(dirs)
+
+    def new_launch() -> str | None:
+        now = live_markers(dirs)
+        if any(before.get(name) != mtime for name, mtime in now.items()):
+            return "A game was launched, so this post-game sync stopped. It'll finish after that game."
+        return None
+
+    _settle(groups, cfg, events, appid)
+    return Engine(cfg, dirs, events).sync(groups, decide, abort_if=new_launch)
+
+
+def _settle(groups: list[Group], cfg: Config, events: Events, appid: int | None) -> None:
+    lower_priority()  # the player may be starting the next game already
+    events.emit("postexit", "Game exited; waiting for saves to finish writing…", appid=appid)
+    wait_until_settled(groups, cfg.sync.exit_settle_s)
+
+
 def wrap(cfg: Config, dirs: Dirs, command: list[str], appid: int | None, events: Events,
          decide: Decider = no_decisions) -> tuple[int, dict]:
     """Sync -> run the game -> wait for a full exit -> sync.
@@ -147,9 +237,7 @@ def wrap(cfg: Config, dirs: Dirs, command: list[str], appid: int | None, events:
 
     after: list = []
     if groups:
-        lower_priority()  # the player may be starting the next game already
-        events.emit("postexit", "Game exited; waiting for saves to finish writing…", appid=appid)
-        wait_until_settled(groups, cfg.sync.exit_settle_s)
+        _settle(groups, cfg, events, appid)
         after = _sync(cfg, dirs, groups, events, decide, None)
     report = {
         "appid": appid,

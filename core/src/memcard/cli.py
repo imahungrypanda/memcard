@@ -10,11 +10,13 @@ import argparse
 import getpass
 import json
 import logging
+import re
 import shutil
 import signal
 import socket
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +55,11 @@ class Ctx:
         elif text is not None:
             print(text)
 
-    def groups(self, ids: list[str] | None) -> list[config.Group]:
+    def groups(self, ids: list[str] | None, appid: int | None = None) -> list[config.Group]:
+        if appid is not None:
+            if ids:
+                raise ConfigError("Pass either group names or --appid, not both.")
+            return self.cfg.groups_for_appid(appid)
         return [self.cfg.group(i) for i in ids] if ids else list(self.cfg.groups)
 
 
@@ -372,10 +378,28 @@ def cmd_detect(ctx: Ctx) -> int:
     return 0
 
 
+def cmd_groups(ctx: Ctx) -> int:
+    """Everything a UI needs to map games to groups, without touching the network."""
+    cfg = ctx.cfg
+    pending_file = ctx.dirs.state / "pending.json"
+    data = {
+        "machine": {"id": cfg.machine_id, "name": cfg.machine_name},
+        "remote": {"spec": cfg.remote.spec, "provider": cfg.remote.provider} if cfg.remote else None,
+        "groups": [
+            {"id": g.id, "label": g.label, "unit": g.unit, "path": str(g.target), "emulator": g.emulator, "appids": g.appids}
+            for g in cfg.groups
+        ],
+        "pending": json.loads(pending_file.read_text()) if pending_file.exists() else {},
+    }
+    lines = [f"{g['id']:<14} {len(g['appids'])} appid(s)  {g['path']}" for g in data["groups"]]
+    ctx.out(data, "\n".join(lines) or "No groups configured. Run `memcard detect --write`.")
+    return 0
+
+
 def cmd_status(ctx: Ctx) -> int:
     eng = _engine(ctx)
     rows, data, worst = [], [], 0
-    for g, plan, err in eng.status(ctx.groups(ctx.args.groups)):
+    for g, plan, err in eng.status(ctx.groups(ctx.args.groups, ctx.args.appid)):
         if err:
             rows.append(f"  {g.id:<14} ✗ {err.message}")
             data.append({"group": g.id, "error": err.to_dict()})
@@ -395,18 +419,45 @@ def cmd_sync(ctx: Ctx) -> int:
     from . import triggers
     from .engine import no_decisions
 
-    if ctx.args.periodic:
-        results = triggers.periodic(ctx.cfg, ctx.dirs, ctx.events)
+    a = ctx.args
+    if (a.before_launch or a.after_exit) and a.appid is None:
+        raise ConfigError("--before-launch and --after-exit need --appid.")
+    if (a.before_launch or a.after_exit or a.periodic) and a.groups:
+        raise ConfigError("--before-launch, --after-exit and --periodic choose their own groups; don't name any.")
+    if a.periodic and a.appid is not None:
+        raise ConfigError("--periodic syncs every group; it doesn't take --appid.")
+    if a.launch_id is not None and not (a.before_launch or a.after_exit):
+        raise ConfigError("--launch-id only goes with --before-launch or --after-exit.")
+    if a.launch_id is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", a.launch_id):
+        raise ConfigError("--launch-id must be 1-64 letters, digits, '-' or '_'.")
+    if a.resolve:
+        decide = parse_resolutions(a.resolve)
+    elif sys.stdin.isatty() and not a.json and not a.non_interactive:
+        decide = interactive_decider(ctx.cfg.machine_name)
     else:
-        if ctx.args.resolve:
-            decide = parse_resolutions(ctx.args.resolve)
-        elif sys.stdin.isatty() and not ctx.args.json and not ctx.args.non_interactive:
-            decide = interactive_decider(ctx.cfg.machine_name)
-        else:
-            decide = no_decisions
-        results = _engine(ctx).sync(ctx.groups(ctx.args.groups), decide)
-    if ctx.args.json:
-        ctx.out({"results": [r.to_dict() for r in results]})
+        decide = no_decisions
+
+    if a.periodic:
+        results = triggers.periodic(ctx.cfg, ctx.dirs, ctx.events)
+    elif a.before_launch:
+        launch_id = a.launch_id or uuid.uuid4().hex
+        results = triggers.before_launch(ctx.cfg, ctx.dirs, a.appid, launch_id, ctx.events, decide)
+    elif a.after_exit:
+        results = triggers.after_exit(ctx.cfg, ctx.dirs, a.appid, a.launch_id, ctx.events, decide)
+    else:
+        results = _engine(ctx).sync(ctx.groups(a.groups, a.appid), decide)
+    stale = results is None
+    results = results or []
+    if a.json:
+        data: dict[str, Any] = {"results": [r.to_dict() for r in results]}
+        if a.appid is not None:
+            data["appid"] = a.appid
+            data["mapped"] = bool(ctx.cfg.groups_for_appid(a.appid))
+        if a.before_launch:
+            data["launch_id"] = launch_id  # pass back to --after-exit
+        if a.after_exit:
+            data["stale"] = stale
+        ctx.out(data)
     codes = [r.error.exit_code for r in results if r.error and r.status == "error"]
     if any(r.status == "conflicts" for r in results):
         codes.append(ConflictsPending.exit_code)
@@ -543,14 +594,25 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--emudeck", help="path to the Emulation (or Emulation/saves) folder")
     sp.add_argument("--write", action="store_true", help="add what was found to config.toml")
 
+    add("groups", cmd_groups, "list configured groups and their appids (no network)")
+
     sp = add("status", cmd_status, "show what a sync would do, without doing it")
     sp.add_argument("groups", nargs="*")
+    sp.add_argument("--appid", type=int, help="only the groups mapped to this Steam appid")
 
     sp = add("sync", cmd_sync, "sync now")
     sp.add_argument("groups", nargs="*")
+    sp.add_argument("--appid", type=int, help="only the groups mapped to this Steam appid")
     sp.add_argument("--resolve", action="append", default=[], metavar="GROUP[:UNIT]=local|remote|both")
     sp.add_argument("--non-interactive", action="store_true", help="never prompt; leave conflicts for later")
-    sp.add_argument("--periodic", action="store_true", help="background pass: skipped while a game runs")
+    when = sp.add_mutually_exclusive_group()
+    when.add_argument("--periodic", action="store_true", help="background pass: skipped while a game runs")
+    when.add_argument("--before-launch", action="store_true",
+                      help="with --appid: pre-launch sync for a launch a UI controls (bounded by launch_timeout_s)")
+    when.add_argument("--after-exit", action="store_true",
+                      help="with --appid: wait for the emulator to exit and writes to settle, then sync at idle priority")
+    sp.add_argument("--launch-id", help="pairs --before-launch with its --after-exit, so a late exit report "
+                    "from an earlier launch is ignored instead of acting on the running game")
 
     sp = add("wrap", cmd_wrap, "Steam launch option: memcard wrap -- %%command%%")
     sp.add_argument("--appid", type=int, help="defaults to the appid Steam passes in the environment")
