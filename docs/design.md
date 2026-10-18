@@ -84,8 +84,10 @@ folder = "memcard"
 
 [sync]
 trash_versions   = 5
+history_versions = 5         # remote generations kept per group
 periodic_minutes = 0         # 0 = off
-launch_timeout_s = 20        # pull gives up and launches with local saves after this
+launch_timeout_s = 20        # pre-launch sync gives up and launches with local saves after this
+exit_settle_s    = 30        # max wait after exit for the emulator to finish writing
 
 [[group]]
 id    = "retroarch"
@@ -281,15 +283,18 @@ everything ──► model, config, paths, errors, log
 
 ```
 memcard init                         machine id + name
-memcard setup [--provider P]         guided wizard (also the backend for both UI wizards)
-memcard remote list|test             reuse existing rclone remotes; round-trip probe
+memcard setup                        guided wizard (terminal)
+memcard setup providers|remotes|validate|apply|use    non-interactive steps the UIs drive (secrets via stdin)
+memcard remote test                  round-trip probe
 memcard detect [--emudeck PATH] [--write]
 memcard status [GROUP…]              per-unit verdicts without changing anything
-memcard sync [GROUP…] [--resolve GROUP[/UNIT]=local|remote|both] [--non-interactive]
-memcard wrap --appid N -- CMD…       Steam launch-option wrapper
+memcard sync [GROUP…] [--resolve GROUP[:UNIT]=local|remote|both] [--non-interactive] [--periodic]
+memcard wrap [--appid N] -- CMD…     Steam launch-option wrapper (appid defaults to SteamGameId)
 memcard trash list|restore
 memcard gc
-memcard daemon                       periodic sync
+memcard export GROUP DIR [--generation N]
+memcard timer enable|disable         systemd oneshot timer running `sync --periodic`
+memcard log
 global: --json   exit codes: 0 ok · 2 conflicts pending · 3 offline/unreachable · 4 config · 1 other
 ```
 
@@ -300,8 +305,8 @@ global: --json   exit codes: 0 ok · 2 conflicts pending · 3 offline/unreachabl
 Recommended: **`memcard wrap` as the Steam launch option on both machines**
 (`memcard wrap --appid 3141592653 -- %command%`). It blocks the launch naturally until
 the pull is done, and pushes only after the child exits *and* the emulator's Flatpak
-instance is gone from `flatpak ps` *and* the group's file hashes are stable across two
-reads (timeout configurable). That's the "fully exited" guarantee.
+instance is gone from `flatpak ps` *and* the group's files stop changing between two
+stat passes (size + mtime; a settle signal only, never a sync decision; timeout configurable). That's the "fully exited" guarantee.
 
 - On the Deck, the Decky plugin installs/removes that launch option on the shortcuts you
   map, and acts as the wrapper's UI: the wrapper posts conflicts/progress to a local
@@ -322,8 +327,10 @@ Memcard must cost nothing during gameplay. Concretely:
   can see the exit, and it does that with a blocking `waitpid`: 0% CPU, no polling, no
   file watchers. The quiescence check (`flatpak ps`, re-hashing) only starts *after* exit.
 - **All hashing and transfer happens before launch or after exit**, never mid-session.
-- **Periodic sync is off by default.** When it's on, it skips any tick while a mapped
-  emulator or any Steam game is running. It runs as a oneshot (systemd user timer), not
+- **Periodic sync is off by default.** When it's on, it skips any tick while a game
+  launched through `memcard wrap` or a mapped emulator's Flatpak is running, and stops at
+  its next safe point if one starts mid-pass. (Games that are neither wrapped nor mapped
+  aren't detected.) It runs as a oneshot (systemd user timer), not
   a long-lived Python loop.
 - **Anything in the background runs at idle priority:** `nice -n 19` and
   `ionice -c3` on rsync, rclone and the hashing pass, so a sync that overlaps a launch
@@ -401,6 +408,11 @@ snapshot on the remote would only add "which machines are behind" reporting; I'd
 | `rclone config create` | Setup writes Memcard's own `rclone.conf` directly (0600), with passwords obscured via `rclone obscure -` on stdin | Keeps secrets off the command line, where `ps` would show them. Remotes in the user's own rclone.conf are reused, never edited. |
 | NDJSON events | Every `--json` line is `{"event": …}`; each command ends with `result` or `error` | One shape for the UIs to parse |
 | (new) | `state/pending.json` lists groups with undecided conflicts | Game Mode syncs leave conflicts for later; UIs and `status` need to know |
-| (new) | GC skips unreferenced objects younger than a day | Another machine's in-flight push may be about to commit them |
+| (new) | GC skips unreferenced objects younger than a day, requires the folder marker, and aborts on any listing failure | Another machine's in-flight push may be about to commit them; a failed listing must never make live objects look unreferenced |
+| (new) | Manifests and snapshots are validated on read: paths must be relative with no `..`/empty/`.` parts, object ids must be 64 lowercase hex | Anyone who can write the cloud folder could otherwise make a pull write or delete files outside the group |
+| `copyto` for HEAD.json | `rcat` for every JSON document, and HEAD is read back after commit | `copyto` skips "matching" files, and on WebDAV vendor=other that means same size: equal-length commits were silently dropped. Found in review; engine tests now also run against `rclone serve webdav`. |
+| (new) | Dangling symlinks and unreadable folders are reported as *unknown*; the planner leaves those paths alone on every side | An unplugged drive behind a symlink must not look like deleted saves |
+| Deadline covers the whole sync | The last safe point is right before a local restore; from there the unit is written whole. SIGTERM sets a cancel flag checked at safe points. | A timeout or cancel mid-restore would have left half a memory card, and `wrap` would launch the game on it |
+| (new) | Before overwriting, each pull verifies the trash copy still matches the planned local state, or replans | A save written after the scan (an emulator running outside `wrap`) would otherwise be lost |
 | Config editing via tomlkit | Reading is stdlib `tomllib`; tomlkit is imported only when writing | Hot paths (`wrap`, `sync`) stay stdlib-only |
 | (new) | Ships as one ~100 KB zipapp (`scripts/build-zipapp.sh`) | Nothing to install on an immutable OS |
