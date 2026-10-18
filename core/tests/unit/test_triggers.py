@@ -60,7 +60,7 @@ def test_ui_launch_markers_expire(tmp_path, monkeypatch):
     monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
     dirs = Dirs.resolve()
     cfg = type("C", (), {"groups": []})()
-    triggers.mark_app_running(dirs, 42)
+    triggers.mark_app_running(dirs, 42, "L1")
     assert triggers.game_running(cfg, dirs)
     old = time.time() - triggers.APP_MARKER_TTL_S - 1
     os.utime(dirs.running / "app-42", (old, old))

@@ -309,3 +309,86 @@ def test_status_by_appid(machine, capsys):
     assert [p["group"] for p in result(events(capsys))] == ["retroarch"]
     assert run("--json", "status", "--appid", "1") == 0
     assert result(events(capsys)) == []
+
+
+def test_late_exit_from_an_earlier_launch_is_ignored(machine, capsys, monkeypatch):
+    """before(A) → after(A) → before(B) → a duplicate after(A) must not touch launch B."""
+    from memcard import triggers
+
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    marker = Dirs.resolve().running / "app-4242"
+    run("sync", "--appid", "4242", "--before-launch", "--launch-id", "A")
+    run("sync", "--appid", "4242", "--after-exit", "--launch-id", "A")
+    run("sync", "--appid", "4242", "--before-launch", "--launch-id", "B")
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "4242", "--after-exit", "--launch-id", "A") == 0
+    evts = events(capsys)
+    assert result(evts) == {"results": [], "appid": 4242, "mapped": True, "stale": True}
+    assert not any(e["event"] == "postexit" for e in evts), "a stale exit must not settle or sync"
+    assert marker.read_text() == "B"
+    assert run("sync", "--appid", "4242", "--after-exit", "--launch-id", "B") == 0
+    assert not marker.exists()
+
+
+def test_after_exit_sync_stops_if_another_game_launches_meanwhile(machine, capsys, monkeypatch):
+    from memcard import triggers
+
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    run("sync", "--appid", "4242", "--before-launch", "--launch-id", "A")
+    (machine / "fr.srm").write_bytes(b"played")
+    real_settle = triggers._settle
+
+    def next_game_starts(groups, cfg, events, appid):
+        real_settle(groups, cfg, events, appid)
+        triggers.mark_app_running(Dirs.resolve(), 777, "other")
+
+    monkeypatch.setattr(triggers, "_settle", next_game_starts)
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "4242", "--after-exit", "--launch-id", "A") != 0
+    assert events(capsys)[-1]["error"]["code"] == "cancelled"
+
+
+def test_conflict_resolved_after_before_launch_keeps_the_launch_marked(machine, tmp_path, capsys, monkeypatch):
+    from memcard import config
+    from memcard.engine import Engine
+
+    d = Dirs.resolve()
+    (machine / "fr.srm").write_bytes(b"base")
+    run("sync")
+    eng = Engine(config.load(d.config_file), d)
+    head = eng.store.head("retroarch")
+    other = tmp_path / "other.srm"
+    other.write_bytes(b"from the pc")
+    from memcard.model import FileEntry
+    from memcard.scan import sha256
+
+    eng.store.upload({sha256(other): other})
+    head.files["fr.srm"] = FileEntry(sha256(other), other.stat().st_size, None, "id-pc", "t")
+    head.machines["id-pc"] = "PC"
+    head.parent, head.generation = head.generation, head.generation + 1
+    eng.store.commit(head)
+    (machine / "fr.srm").write_bytes(b"from the deck")
+
+    capsys.readouterr()
+    assert run("--json", "sync", "--appid", "4242", "--before-launch", "--launch-id", "A") == 2
+    assert "retroarch" in json.loads((d.state / "pending.json").read_text())
+    assert run("--json", "groups") == 0
+    assert result(events(capsys))["pending"]["retroarch"]["units"] == ["fr.srm"]
+    assert run("sync", "--appid", "4242", "--resolve", "retroarch:fr.srm=remote") == 0
+    assert (machine / "fr.srm").read_bytes() == b"from the pc"
+    assert (d.running / "app-4242").read_text() == "A", "still playing: the marker stays until after-exit"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("sync", "retroarch", "--appid", "4242"),
+        ("status", "retroarch", "--appid", "4242"),
+        ("sync", "retroarch", "--appid", "4242", "--before-launch"),
+        ("sync", "--periodic", "--appid", "4242"),
+        ("sync", "--launch-id", "A"),
+        ("sync", "--appid", "4242", "--before-launch", "--launch-id", "../x"),
+    ],
+)
+def test_contradictory_flags_are_config_errors(machine, argv):
+    assert run(*argv) == 4

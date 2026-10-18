@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import re
+import uuid
 import json
 import logging
 import shutil
@@ -420,6 +422,14 @@ def cmd_sync(ctx: Ctx) -> int:
     a = ctx.args
     if (a.before_launch or a.after_exit) and a.appid is None:
         raise ConfigError("--before-launch and --after-exit need --appid.")
+    if (a.before_launch or a.after_exit or a.periodic) and a.groups:
+        raise ConfigError("--before-launch, --after-exit and --periodic choose their own groups; don't name any.")
+    if a.periodic and a.appid is not None:
+        raise ConfigError("--periodic syncs every group; it doesn't take --appid.")
+    if a.launch_id is not None and not (a.before_launch or a.after_exit):
+        raise ConfigError("--launch-id only goes with --before-launch or --after-exit.")
+    if a.launch_id is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", a.launch_id):
+        raise ConfigError("--launch-id must be 1-64 letters, digits, '-' or '_'.")
     if a.resolve:
         decide = parse_resolutions(a.resolve)
     elif sys.stdin.isatty() and not a.json and not a.non_interactive:
@@ -430,16 +440,20 @@ def cmd_sync(ctx: Ctx) -> int:
     if a.periodic:
         results = triggers.periodic(ctx.cfg, ctx.dirs, ctx.events)
     elif a.before_launch:
-        results = triggers.before_launch(ctx.cfg, ctx.dirs, a.appid, ctx.events, decide)
+        results = triggers.before_launch(ctx.cfg, ctx.dirs, a.appid, a.launch_id or uuid.uuid4().hex, ctx.events, decide)
     elif a.after_exit:
-        results = triggers.after_exit(ctx.cfg, ctx.dirs, a.appid, ctx.events, decide)
+        results = triggers.after_exit(ctx.cfg, ctx.dirs, a.appid, a.launch_id, ctx.events, decide)
     else:
         results = _engine(ctx).sync(ctx.groups(a.groups, a.appid), decide)
+    stale = results is None
+    results = results or []
     if a.json:
         data: dict[str, Any] = {"results": [r.to_dict() for r in results]}
         if a.appid is not None:
             data["appid"] = a.appid
             data["mapped"] = bool(ctx.cfg.groups_for_appid(a.appid))
+        if a.after_exit:
+            data["stale"] = stale
         ctx.out(data)
     codes = [r.error.exit_code for r in results if r.error and r.status == "error"]
     if any(r.status == "conflicts" for r in results):
@@ -594,6 +608,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="with --appid: pre-launch sync for a launch a UI controls (bounded by launch_timeout_s)")
     when.add_argument("--after-exit", action="store_true",
                       help="with --appid: wait for the emulator to exit and writes to settle, then sync at idle priority")
+    sp.add_argument("--launch-id", help="pairs --before-launch with its --after-exit, so a late exit report "
+                    "from an earlier launch is ignored instead of acting on the running game")
 
     sp = add("wrap", cmd_wrap, "Steam launch option: memcard wrap -- %%command%%")
     sp.add_argument("--appid", type=int, help="defaults to the appid Steam passes in the environment")

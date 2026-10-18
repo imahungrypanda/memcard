@@ -34,7 +34,7 @@ launch options, and `%command%` expansion for shortcuts is unverified. `wrap` st
 - [x] `sync --appid N` / `status --appid N`: the groups mapped to an appid
 - [x] `sync --before-launch`: launch_timeout_s deadline + a running marker that lasts until `--after-exit`
 - [x] `sync --after-exit`: idle priority, wait for the emulator to exit and writes to settle, then sync
-- [x] `wrap` reuses the same before/after functions; periodic skips while an app-marker is live
+- [x] `wrap` shares the settle step; periodic skips while an app marker is live; `--launch-id` pairs before/after so stale exits are ignored
 - [x] Tests + docs (CLAUDE.md, design §8)
 
 ### 2b. Plugin (PR: feat/decky, stacked on 2a)
