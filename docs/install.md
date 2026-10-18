@@ -373,6 +373,8 @@ cloud, with EmuDeck-shaped symlinks. These parts need your hardware:
 - [ ] Pressing Play twice quickly gives a "Still syncing saves…" toast and one launch, not two.
 - [ ] Resuming a running game from the library doesn't sync or cancel anything.
 - [ ] While a game runs, the panel's Sync now is greyed out with a note.
+- [ ] Reload the plugin mid-game (Decky ⚙ → reload, or reinstall the zip), then: Resume
+      doesn't sync, and quitting still shows "Saves synced".
 - [ ] Find EmuDeck saves → Add maps your shortcuts. Check what would sync and Sync now
       show sensible results.
 

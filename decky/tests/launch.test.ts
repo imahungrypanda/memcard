@@ -29,7 +29,7 @@ function world(opts: { autoSync?: boolean; mapped?: number[] } = {}) {
       log.push(`before ${a} ${id}`);
       return new Promise<void>((r) => release.push(r)); // finishes when the test says so
     },
-    afterExit: async (a, id) => void log.push(`after ${a} ${id}`),
+    afterExit: async (a, id) => void log.push(`after ${a} ${id ?? "-"}`),
     notify: (m) => log.push(`notify ${m}`),
     newId: () => `L${++ids}`,
   });
@@ -186,4 +186,47 @@ test("other actions are ignored", () => {
   const w = world();
   w.c.onGameActionStart(1, GAME_ID, "Install", 100);
   assert.deepEqual(w.log, []);
+});
+
+
+test("after a reload mid-game, Resume isn't intercepted", () => {
+  const w = world();
+  w.c.seedRunning([SHORTCUT]); // fresh controller learns what's running from Steam
+  w.press(1);
+  assert.deepEqual(w.log, []);
+});
+
+test("after a reload mid-game, quitting still pushes and clears the marker", () => {
+  const w = world();
+  w.c.seedRunning([SHORTCUT]);
+  w.exited(7);
+  assert.deepEqual(w.log, [`after ${SHORTCUT} -`]);
+});
+
+test("a game that starts after the watchdog still gets an after-exit when it quits", async () => {
+  const w = world();
+  w.press(1);
+  await w.finishSync();
+  w.press(2); // our relaunch, let through
+  w.advance(START_TIMEOUT_MS + 1); // ...but Steam takes >90 s to report it running; watchdog closes L1
+  assert.equal(w.log.at(-1), `after ${SHORTCUT} L1`);
+  w.started(9);
+  w.exited(9);
+  assert.equal(w.log.at(-1), `after ${SHORTCUT} -`, "its exit still pushes and clears the marker");
+});
+
+test("no session and auto-sync off: an exit does nothing", () => {
+  const w = world({ autoSync: false });
+  w.started(7);
+  w.exited(7);
+  assert.deepEqual(w.log, []);
+});
+
+test("the panel hears about games starting and stopping", () => {
+  const w = world();
+  const seen: boolean[] = [];
+  w.c.onChange(() => seen.push(w.c.isRunning()));
+  w.started(7);
+  w.exited(7);
+  assert.deepEqual(seen, [true, false]);
 });

@@ -103,7 +103,10 @@ class Runner:
             stderr = (await stderr_task).decode(errors="replace")
         finally:
             if proc.returncode is None:  # we bailed out mid-stream: don't leave it running
-                proc.terminate()
+                try:
+                    proc.terminate()
+                except ProcessLookupError:
+                    pass  # already exited, just not reaped yet
                 await proc.wait()
             if run_id:
                 self.procs.pop(run_id, None)

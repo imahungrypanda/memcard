@@ -80,6 +80,7 @@ function Content() {
   const [plans, setPlans] = useState<Record<string, GroupPlan>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<MemcardError | null>(null);
+  const [playing, setPlaying] = useState(controller.isRunning());
 
   const reload = async () => {
     const env = await environment();
@@ -89,9 +90,11 @@ function Content() {
 
   useEffect(() => {
     const off = onGroups(setGroups);
+    const offRunning = controller.onChange(() => setPlaying(controller.isRunning()));
     reload();
     return () => {
       off();
+      offRunning();
     };
   }, []);
 
@@ -124,7 +127,6 @@ function Content() {
 
   const pending = Object.keys(groups?.pending ?? {});
   // Never sync under a running game: core refuses too, this just explains it up front.
-  const playing = controller.isRunning();
   const blocked = !!busy || playing;
   return (
     <>

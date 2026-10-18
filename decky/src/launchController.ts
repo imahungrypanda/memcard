@@ -10,6 +10,9 @@
 //     even if the relaunch never turns into a running game (watchdog)
 //   - exits are matched to the session they belong to, so late or duplicate
 //     reports from an earlier launch can't end the current one
+//   - state lost to a plugin reload or crash is recovered: running games are seeded
+//     from Steam at startup, and a mapped game that exits with no session still
+//     gets an (id-less) --after-exit, which clears any leftover marker and pushes
 
 import type { SyncData } from "./types";
 
@@ -22,7 +25,7 @@ export interface Deps {
   autoSync(): boolean;
   isMapped(appid: number): boolean;
   beforeLaunch(appid: number, launchId: string): Promise<void>;
-  afterExit(appid: number, launchId: string): Promise<void>;
+  afterExit(appid: number, launchId: string | null): Promise<void>;
   notify(message: string): void;
   newId(): string;
 }
@@ -54,6 +57,8 @@ export class LaunchController {
   private letThrough = new Map<number, number>(); // appid -> expiry
   private sessions = new Map<number, Session>();
   private lastLaunched: number | null = null;
+  private endedInstance = new Map<number, number>(); // appid -> instance whose exit closed its session
+  private listeners = new Set<() => void>();
   private deps: Deps;
 
   constructor(deps: Deps) {
@@ -62,6 +67,21 @@ export class LaunchController {
 
   isRunning(appid?: number): boolean {
     return appid === undefined ? this.running.size > 0 : this.running.has(appid);
+  }
+
+  /** At startup: games already running (e.g. the plugin was reloaded mid-game). */
+  seedRunning(appids: number[]): void {
+    appids.forEach((a) => a > 0 && this.running.add(a >>> 0));
+    this.changed();
+  }
+
+  onChange(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private changed(): void {
+    this.listeners.forEach((fn) => fn());
   }
 
   onGameActionStart(actionId: number, gameId: string, action: string, launchSource: number): void {
@@ -110,6 +130,7 @@ export class LaunchController {
     const session = this.sessions.get(appid);
     if (bRunning) {
       this.running.add(appid);
+      this.changed();
       if (session && !session.started) {
         session.started = true;
         session.instanceId = instanceId;
@@ -118,11 +139,21 @@ export class LaunchController {
       return;
     }
     this.running.delete(appid);
+    this.changed();
     if (this.lastLaunched === appid) this.lastLaunched = null;
-    // Only end the session this exit belongs to: a late or duplicate exit from an
-    // earlier launch arrives before the new one is running, or with another instance.
-    if (session && session.started && (session.instanceId === undefined || session.instanceId === instanceId)) {
-      this.endSession(appid);
+    if (session) {
+      // Only end the session this exit belongs to: a late or duplicate exit from an
+      // earlier launch arrives before the new one is running, or with another instance.
+      if (session.started && (session.instanceId === undefined || session.instanceId === instanceId)) {
+        this.endedInstance.set(appid, instanceId);
+        this.endSession(appid);
+      }
+    } else if (this.endedInstance.get(appid) === instanceId) {
+      // A duplicate report of an exit we already handled.
+    } else if (this.deps.autoSync() && this.deps.isMapped(appid)) {
+      // No session: we lost it (plugin reload, watchdog fired before a slow start).
+      // An id-less --after-exit clears whatever marker is left and pushes the saves.
+      this.deps.afterExit(appid, null).catch((e) => this.deps.notify(`Saves not uploaded yet: ${String(e)}`));
     }
   }
 

@@ -1,4 +1,5 @@
 import { toaster } from "@decky/api";
+import { Router } from "@decky/ui";
 import { cachedGroups, currentSettings, errorText, isMapped, memcard, refreshGroups } from "./backend";
 import { askResolutions } from "./conflicts";
 import { describe, LaunchController } from "./launchController";
@@ -35,8 +36,9 @@ async function beforeLaunch(appid: number, launchId: string): Promise<void> {
   else if (notify) toast("Memcard", `Conflicts settled. ${d.text}`);
 }
 
-async function afterExit(appid: number, launchId: string): Promise<void> {
-  const r = await memcard<SyncData & { stale?: boolean }>(["sync", "--appid", appid, "--after-exit", "--launch-id", launchId]);
+async function afterExit(appid: number, launchId: string | null): Promise<void> {
+  const id = launchId ? ["--launch-id", launchId] : [];
+  const r = await memcard<SyncData & { stale?: boolean }>(["sync", "--appid", appid, "--after-exit", ...id]);
   refreshGroups();
   if (r.result?.stale) return;
   if (r.error?.code === "cancelled") return toast("Memcard", errorText(r.error));
@@ -62,6 +64,11 @@ export const controller = new LaunchController({
 });
 
 export function registerLaunchHooks(): () => void {
+  try {
+    controller.seedRunning(Router.RunningApps.map((a) => Number(a.appid)).filter(Number.isFinite));
+  } catch {
+    // Router not ready; lifetime notifications will fill it in
+  }
   const start = SteamClient.Apps.RegisterForGameActionStart((actionId, gameId, action, launchSource) =>
     controller.onGameActionStart(actionId, gameId, action, launchSource),
   );
