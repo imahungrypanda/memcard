@@ -374,7 +374,8 @@ def test_conflict_resolved_after_before_launch_keeps_the_launch_marked(machine, 
     assert "retroarch" in json.loads((d.state / "pending.json").read_text())
     assert run("--json", "groups") == 0
     assert result(events(capsys))["pending"]["retroarch"]["units"] == ["fr.srm"]
-    assert run("sync", "--appid", "4242", "--resolve", "retroarch:fr.srm=remote") == 0
+    # During a launch, settling a conflict is still the pre-launch sync: same hook, same id.
+    assert run("sync", "--appid", "4242", "--before-launch", "--launch-id", "A", "--resolve", "retroarch:fr.srm=remote") == 0
     assert (machine / "fr.srm").read_bytes() == b"from the pc"
     assert (d.running / "app-4242").read_text() == "A", "still playing: the marker stays until after-exit"
 
@@ -408,3 +409,21 @@ def test_leftover_marker_from_a_lost_exit_doesnt_block_the_next_push(machine, ca
     assert result(events(capsys))["results"][0]["pushed"] == ["fr.srm"]
     d = Dirs.resolve()
     assert Engine(config.load(d.config_file), d).store.head("retroarch").files["fr.srm"].size == len(b"played")
+
+
+def test_manual_sync_refuses_while_a_game_runs(machine, capsys, monkeypatch):
+    """A restore under a running emulator gets overwritten when it next saves."""
+    from memcard import triggers
+
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    (machine / "fr.srm").write_bytes(b"x")
+    run("sync", "--appid", "4242", "--before-launch", "--launch-id", "A")
+    capsys.readouterr()
+    assert run("--json", "sync") == 1
+    assert events(capsys)[-1]["error"]["code"] == "game_running"
+    assert run("--json", "sync", "--resolve", "retroarch=remote") == 1
+    run("sync", "--appid", "4242", "--after-exit", "--launch-id", "A")
+    assert run("sync") == 0
+    # detect mapped retroarch to its Flatpak, so RetroArch open outside Memcard counts too
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: {"org.libretro.RetroArch"})
+    assert run("sync") == 1

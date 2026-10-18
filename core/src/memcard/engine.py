@@ -219,9 +219,10 @@ class Engine:
     def _safe_point(self) -> None:
         self.deadline.check()
         reason = self.abort_if() if self.abort_if else None
+        if isinstance(reason, str):
+            raise Cancelled(reason)  # the caller's message says what happens next
         if reason:
-            message = reason if isinstance(reason, str) else "A game started, so background sync stopped."
-            raise Cancelled(message, hint="It'll run again later.")
+            raise Cancelled("A game started, so background sync stopped.", hint="It'll run again later.")
 
     def _staging(self) -> Path:
         self.dirs.staging.mkdir(parents=True, exist_ok=True)

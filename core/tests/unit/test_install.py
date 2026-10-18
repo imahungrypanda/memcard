@@ -61,3 +61,19 @@ def test_installed_rclone_is_found(site, monkeypatch):
     monkeypatch.setattr(proc.shutil, "which", lambda name: None)
     install.install_rclone(Dirs.resolve())
     assert proc.find_tool("rclone") == str(install.bin_dir(Dirs.resolve()) / "rclone")
+
+
+def test_empty_version_file_is_a_clean_error(site):
+    root, _ = site
+    (root / "version.txt").write_text("")
+    with pytest.raises(MemcardError, match="unexpected version"):
+        install.install_rclone(Dirs.resolve())
+
+
+def test_memcards_own_rclone_wins_over_path(site, monkeypatch, tmp_path):
+    from memcard.transport import proc
+
+    other = tmp_path / "old-rclone"
+    monkeypatch.setattr(proc.shutil, "which", lambda name: str(other))
+    install.install_rclone(Dirs.resolve())
+    assert proc.find_tool("rclone") == str(install.bin_dir(Dirs.resolve()) / "rclone")

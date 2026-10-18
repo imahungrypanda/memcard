@@ -1,8 +1,10 @@
 """Fetch rclone for hosts where installing packages isn't an option (SteamOS).
 
-Downloads the official static build, checks it against rclone's published
-SHA256SUMS, and puts the single binary in Memcard's own data dir, where
-`transport.proc.find_tool` looks. Nothing outside that dir is touched.
+Downloads the official static build over HTTPS, checks it against the
+SHA256SUMS published next to it, and puts the single binary in Memcard's own
+data dir, which `transport.proc.find_tool` prefers. Nothing outside that dir is
+touched. The checksum catches a corrupt or truncated download; it comes from
+the same host, so it is not a defence against a compromised download site.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from pathlib import Path
 from .errors import MemcardError
 from .paths import Dirs
 
-BASE = os.environ.get("MEMCARD_RCLONE_BASE", "https://downloads.rclone.org/")
+BASE = "https://downloads.rclone.org/"
 ARCH = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
 MAX_ZIP = 200 * 1024 * 1024
 
@@ -47,7 +49,8 @@ def install_rclone(dirs: Dirs) -> dict:
     if not arch:
         raise MemcardError(f"No rclone build for this CPU ({platform.machine()}).")
 
-    version = _fetch(BASE + "version.txt", 1024).decode().split()[-1].strip()
+    words = _fetch(BASE + "version.txt", 1024).decode(errors="replace").split()
+    version = words[-1] if words else ""
     if not re.fullmatch(r"v\d+\.\d+\.\d+", version):
         raise MemcardError("rclone's download site returned an unexpected version.", detail=version[:100])
     name = f"rclone-{version}-linux-{arch}.zip"
@@ -68,7 +71,10 @@ def install_rclone(dirs: Dirs) -> dict:
     tmp = dest_dir / ".rclone.tmp"
     tmp.write_bytes(binary)
     tmp.chmod(0o755)
-    check = subprocess.run([str(tmp), "version"], capture_output=True, text=True)
+    try:
+        check = subprocess.run([str(tmp), "version"], capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        check = subprocess.CompletedProcess([], 1, "", "timed out")
     if check.returncode != 0 or version not in check.stdout:
         tmp.unlink(missing_ok=True)
         raise MemcardError("The downloaded rclone didn't run.", detail=check.stderr[-1000:])

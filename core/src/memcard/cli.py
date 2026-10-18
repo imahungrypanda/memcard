@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__, config, log as logsetup, providers
-from .errors import Cancelled, ConfigError, ConflictsPending, MemcardError
+from .errors import Cancelled, ConfigError, ConflictsPending, GameRunning, MemcardError
 from .events import Events
 from .model import GroupPlan, Resolution, UnitPlan
 from .paths import Dirs, in_game_mode
@@ -454,6 +454,14 @@ def cmd_sync(ctx: Ctx) -> int:
     elif a.after_exit:
         results = triggers.after_exit(ctx.cfg, ctx.dirs, a.appid, a.launch_id, ctx.events, decide)
     else:
+        # A manual sync could restore files under a running emulator, which then
+        # overwrites them (or pushes a half-flushed save). The launch hooks own
+        # syncing around games; this waits until the game is over.
+        if triggers.game_running(ctx.cfg, ctx.dirs):
+            raise GameRunning(
+                "A game is running, so Memcard won't touch saves right now.",
+                hint="Sync after you quit the game; it also happens automatically on exit.",
+            )
         results = _engine(ctx).sync(ctx.groups(a.groups, a.appid), decide)
     stale = results is None
     results = results or []

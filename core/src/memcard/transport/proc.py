@@ -22,14 +22,18 @@ def find_tool(name: str) -> str:
     override = os.environ.get(f"MEMCARD_{name.upper()}")
     if override:
         return override
+    from ..paths import Dirs
+
+    # Memcard's own copy (from `setup install-rclone`) wins, so updating it takes effect.
+    own = Dirs.resolve().data / "bin" / name
+    if own.is_file() and os.access(own, os.X_OK):
+        return str(own)
     found = shutil.which(name)
     if found:
         return found
-    from ..paths import Dirs
-
-    for d in (Path.home() / ".local/bin", Dirs.resolve().data / "bin"):
-        if (d / name).is_file() and os.access(d / name, os.X_OK):
-            return str(d / name)
+    local = Path.home() / ".local/bin" / name  # Steam launches games with a minimal PATH
+    if local.is_file() and os.access(local, os.X_OK):
+        return str(local)
     raise ToolMissing(f"{name} isn't installed.", hint=_HINTS.get(name))
 
 
