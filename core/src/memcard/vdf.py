@@ -61,8 +61,13 @@ def shortcuts(path: Path) -> list[Shortcut]:
     entries = root.get("shortcuts", {})
     out = []
     for e in entries.values():
+        if not isinstance(e, dict):
+            continue
         get = lambda k: e.get(k, e.get(k.lower(), ""))  # noqa: E731 - Steam is inconsistent about case
-        out.append(Shortcut(get("appid") & 0xFFFFFFFF, get("AppName"), get("Exe"), get("LaunchOptions")))
+        appid = get("appid")
+        if not isinstance(appid, int):
+            continue  # very old shortcuts have no appid; nothing to map
+        out.append(Shortcut(appid & 0xFFFFFFFF, get("AppName"), get("Exe"), get("LaunchOptions")))
     return out
 
 

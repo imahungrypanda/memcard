@@ -177,3 +177,49 @@ def test_setup_apply_reads_secrets_from_stdin_and_probes(machine, tmp_path, monk
     from memcard import config
 
     assert config.load(Dirs.resolve().config_file).remote.name == "cloud"
+
+
+def test_damaged_remote_manifest_is_reported_not_a_crash(machine, capsys):
+    from memcard import config
+    from memcard.engine import Engine
+
+    (machine / "fr.srm").write_bytes(b"x")
+    run("sync")
+    d = Dirs.resolve()
+    store = Engine(config.load(d.config_file), d).store
+    store.write_json({"format": 99}, "groups", "retroarch", "HEAD.json")
+    capsys.readouterr()
+    assert run("--json", "status") == 3
+    groups = result(events(capsys))  # status reports per-group errors inside its result
+    assert groups[0]["error"]["code"] == "remote_corrupt"
+
+
+def test_unexpected_exceptions_still_end_in_an_error_event(machine, capsys, monkeypatch):
+    from memcard import engine
+
+    monkeypatch.setattr(engine.Engine, "status", lambda self, groups: 1 / 0)
+    capsys.readouterr()
+    assert run("--json", "status") == 1
+    last = events(capsys)[-1]
+    assert last["event"] == "error" and "ZeroDivisionError" in last["error"]["detail"]
+
+
+def test_wrap_launches_even_if_sync_blows_up_and_ends_with_a_result(machine, capsys, monkeypatch):
+    from memcard import engine
+
+    seen = []
+    monkeypatch.setattr(engine.Engine, "sync", lambda *a, **k: seen.append(list(Dirs.resolve().running.iterdir())) or 1 / 0)
+    capsys.readouterr()
+    assert run("--json", "wrap", "--appid", "4242", "--", sys.executable, "-c", "raise SystemExit(3)") == 3
+    evts = events(capsys)
+    assert evts[-1]["event"] == "result" and evts[-1]["data"]["exit_code"] == 3
+    assert any(e["event"] == "warning" for e in evts)
+    assert seen and seen[0], "running marker must exist before the pre-launch sync"
+
+
+def test_validate_reads_values_from_stdin_and_never_logs_them(machine, monkeypatch, capsys):
+    values = json.dumps({"user": "alice", "url": "https://c.example.com", "pass": "hunter2-secret"})
+    capsys.readouterr()
+    assert run("--json", "setup", "validate", "--provider", "nextcloud", stdin=values, monkeypatch=monkeypatch) == 4
+    assert "file endpoint" in result(events(capsys))["problems"]["url"]
+    assert "hunter2-secret" not in Dirs.resolve().log_file.read_text()

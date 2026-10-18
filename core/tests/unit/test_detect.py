@@ -60,3 +60,9 @@ def test_find_saves_dir_accepts_either_level(emulation):
     assert detect.find_saves_dir(emulation) == emulation / "saves"
     assert detect.find_saves_dir(emulation / "saves") == emulation / "saves"
     assert detect.find_saves_dir(Path("/nonexistent")) is None
+
+
+def test_shortcuts_without_an_appid_are_skipped(tmp_path):
+    f = tmp_path / "shortcuts.vdf"
+    f.write_bytes(shortcuts_vdf([{"AppName": "Ancient", "Exe": "/x/retroarch.sh"}, {"appid": 5, "AppName": "New", "Exe": "/x"}]))
+    assert [s.appid for s in vdf.shortcuts(f)] == [5]

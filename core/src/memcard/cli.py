@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__, config, log as logsetup, providers
-from .errors import ConfigError, ConflictsPending, MemcardError
+from .errors import Cancelled, ConfigError, ConflictsPending, MemcardError
 from .events import Events
 from .model import GroupPlan, Resolution, UnitPlan
 from .paths import Dirs, in_game_mode
@@ -170,10 +170,14 @@ def cmd_setup_remotes(ctx: Ctx) -> int:
 
 
 def cmd_setup_validate(ctx: Ctx) -> int:
+    """Field checks for the UIs. Values come as a JSON object on stdin, never argv
+    (argv is visible in `ps`): {"user": "alice", "url": "https://..."}"""
     from .setup import validate
 
     p = _provider(ctx.args.provider)
-    values = dict(kv.split("=", 1) for kv in ctx.args.field)
+    values = _stdin_json()
+    if not isinstance(values, dict):
+        raise ConfigError("`setup validate` expects a JSON object of field values on stdin.")
     problems, earlier = {}, {}
     for f in p.fields:
         if f.key in values:
@@ -190,7 +194,9 @@ def cmd_setup_apply(ctx: Ctx) -> int:
     """
     from .setup import save_remote
 
-    req = json.loads(sys.stdin.read())
+    req = _stdin_json()
+    if not isinstance(req, dict) or not {"provider", "name"} <= req.keys():
+        raise ConfigError("`setup apply` expects a JSON object with at least provider and name on stdin.")
     p = _provider(req["provider"])
     save_remote(ctx.dirs.rclone_config, p, req["name"], req.get("values", {}), update=bool(req.get("update")))
     return _connect(ctx, req["name"], req.get("folder", "memcard"), p, None)
@@ -205,6 +211,13 @@ def cmd_setup_use(ctx: Ctx) -> int:
         raise ConfigError(f"No rclone remote called {ctx.args.name!r}.", hint="`memcard setup remotes` lists the ones available.")
     r = match[0]
     return _connect(ctx, r.name, ctx.args.folder, r.provider, None if r.owned else str(r.config_path))
+
+
+def _stdin_json() -> Any:
+    try:
+        return json.loads(sys.stdin.read())
+    except json.JSONDecodeError as e:
+        raise ConfigError(f"Couldn't read the JSON on stdin: {e}") from e
 
 
 def _provider(key: str) -> providers.Provider:
@@ -406,7 +419,9 @@ def cmd_wrap(ctx: Ctx) -> int:
 
     command = ctx.args.command[1:] if ctx.args.command[:1] == ["--"] else ctx.args.command
     decide = interactive_decider(ctx.cfg.machine_name) if sys.stdin.isatty() else no_decisions
-    return triggers.wrap(ctx.cfg, ctx.dirs, command, ctx.args.appid, ctx.events, decide)
+    code, report = triggers.wrap(ctx.cfg, ctx.dirs, command, ctx.args.appid, ctx.events, decide)
+    ctx.out(report)
+    return code
 
 
 def cmd_trash_list(ctx: Ctx) -> int:
@@ -429,13 +444,16 @@ def cmd_trash_restore(ctx: Ctx) -> int:
     if not batch:
         raise ConfigError(f"No trash batch {ctx.args.batch!r} for {group.id}.", hint="`memcard trash list` shows what's there.")
     rels = ctx.args.files or batch.files()
-    restore_from_trash(group, batch.path, rels, trash)
+    restore_from_trash(group, batch.path, rels, trash, ctx.dirs)
     ctx.out({"restored": rels}, f"Restored {len(rels)} file(s). Current versions were trashed first. Run `memcard sync` to upload.")
     return 0
 
 
 def cmd_gc(ctx: Ctx) -> int:
-    result = _engine(ctx).store.gc(ctx.cfg.sync.history_versions)
+    from .engine import sync_lock
+
+    with sync_lock(ctx.dirs):
+        result = _engine(ctx).store.gc(ctx.cfg.sync.history_versions)
     ctx.out(result, f"Pruned {result['history_pruned']} old manifest(s), deleted {result['objects_deleted']} unused object(s).")
     return 0
 
@@ -510,7 +528,6 @@ def build_parser() -> argparse.ArgumentParser:
         ssub.add_parser(name, help=text, parents=[common]).set_defaults(fn=fn)
     v = ssub.add_parser("validate", help="check field values before saving", parents=[common])
     v.add_argument("--provider", required=True)
-    v.add_argument("--field", action="append", default=[], metavar="KEY=VALUE")
     v.set_defaults(fn=cmd_setup_validate)
     ssub.add_parser("apply", help="create/update a remote from JSON on stdin", parents=[common]).set_defaults(fn=cmd_setup_apply)
     u = ssub.add_parser("use", help="use an existing rclone remote", parents=[common])
@@ -569,7 +586,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _interrupt(signum, frame):
-    raise KeyboardInterrupt
+    """First SIGTERM: stop at the engine's next safe point (a local restore always
+    finishes its unit). A second one stops immediately."""
+    from .transport.proc import CANCEL
+
+    if CANCEL.is_set():
+        raise KeyboardInterrupt
+    CANCEL.set()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -578,22 +601,29 @@ def main(argv: list[str] | None = None) -> int:
     args.verbose = getattr(args, "verbose", False)
     ctx = Ctx(args)
     logsetup.setup(ctx.dirs.log_file, args.verbose)
-    logger.info("memcard %s: %s", __version__, " ".join(sys.argv[1:]) if argv is None else argv)
-    signal.signal(signal.SIGTERM, _interrupt)  # UIs cancel with SIGTERM; unwind cleanly
+    # Only the subcommand is logged: argv can carry paths or values we'd rather not keep.
+    logger.info("memcard %s: %s", __version__, args.cmd)
+    signal.signal(signal.SIGTERM, _interrupt)  # UIs cancel with SIGTERM
     try:
         return args.fn(ctx)
     except MemcardError as e:
-        logger.error("%s: %s | %s", e.code, e.message, e.detail or "")
-        if args.json:
-            ctx.events.emit("error", e.message, error=e.to_dict())
-        else:
-            print(f"✗ {e.message}" + (f"\n  {e.hint}" if e.hint else ""), file=sys.stderr)
-            if e.detail and args.verbose:
-                print(f"\n{e.detail}", file=sys.stderr)
-        return e.exit_code
+        return _fail(ctx, e)
     except KeyboardInterrupt:
-        print("\nStopped. Nothing is left half-done; run sync again to finish.", file=sys.stderr)
-        return 130
+        return _fail(ctx, Cancelled("Stopped.", hint="Nothing is left half-done; run sync again to finish."), 130)
+    except Exception as e:  # noqa: BLE001 - every --json stream must end in result or error
+        logger.exception("unexpected error")
+        return _fail(ctx, MemcardError("Memcard hit an unexpected error.", hint=f"Details are in {ctx.dirs.log_file}.", detail=repr(e)))
+
+
+def _fail(ctx: Ctx, e: MemcardError, code: int | None = None) -> int:
+    logger.error("%s: %s | %s", e.code, e.message, e.detail or "")
+    if ctx.args.json:
+        ctx.events.emit("error", e.message, error=e.to_dict())
+    else:
+        print(f"✗ {e.message}" + (f"\n  {e.hint}" if e.hint else ""), file=sys.stderr)
+        if e.detail and ctx.args.verbose:
+            print(f"\n{e.detail}", file=sys.stderr)
+    return code if code is not None else e.exit_code
 
 
 if __name__ == "__main__":
