@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "py_modules"))
 
-from memcard_decky.runner import ALLOWED, Runner, clean_env  # noqa: E402
+from memcard_decky.runner import ALLOWED, Runner, clean_env, extract_token  # noqa: E402
 from memcard_decky.settings import Settings  # noqa: E402
 
 
@@ -134,3 +134,27 @@ def test_settings_defaults_and_validation(tmp_path):
         s.set("auto_sync", "no")
     with pytest.raises(ValueError):
         s.set("unknown", True)
+
+
+def test_a_line_too_long_doesnt_leave_memcard_running(tmp_path):
+    import memcard_decky.runner as runner_mod
+
+    r = make(tmp_path, """
+        import json, time
+        print("x" * 5000, flush=True)
+        time.sleep(30)
+    """)
+    old = runner_mod.LINE_LIMIT
+    runner_mod.LINE_LIMIT = 1000
+    try:
+        with pytest.raises(ValueError):
+            run(r.run(["status"], run_id="r1"))
+    finally:
+        runner_mod.LINE_LIMIT = old
+    assert r.procs == {}
+
+
+def test_token_is_pulled_out_of_an_authorize_transcript():
+    transcript = 'Paste the following into your remote machine --->\n{"access_token":"a","refresh_token":"b"}\n<---End paste\n'
+    assert extract_token(transcript) == '{"access_token":"a","refresh_token":"b"}'
+    assert extract_token('  {"x":1}\n') == '{"x":1}'

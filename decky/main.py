@@ -12,7 +12,7 @@ from pathlib import Path
 
 import decky  # provided by Decky Loader at runtime
 
-from memcard_decky.runner import Runner
+from memcard_decky.runner import Runner, extract_token
 from memcard_decky.settings import Settings
 
 MAX_TOKEN_FILE = 64 * 1024
@@ -38,23 +38,16 @@ class Plugin:
     # --- called from the frontend -------------------------------------------------
 
     async def memcard(self, args: list, stdin: str | None = None, run_id: str | None = None) -> dict:
-        """Run `memcard --json <args>`. Progress events are re-emitted as "memcard_event"."""
+        """Run `memcard --json <args>` and return its final result or error."""
         run_id = run_id or uuid.uuid4().hex
-
-        async def relay(event: dict) -> None:
-            await decky.emit("memcard_event", run_id, event)
-
         try:
-            result = await self.runner.run([str(a) for a in args], stdin=stdin, run_id=run_id, emit=relay)
+            result = await self.runner.run([str(a) for a in args], stdin=stdin, run_id=run_id)
         except (ValueError, FileNotFoundError) as e:
             result = {"exit_code": None, "result": None, "warnings": [],
                       "error": {"code": "plugin", "message": str(e), "hint": None, "detail": None}}
         if result["error"]:
             decky.logger.warning("memcard %s failed: %s", args[:1], result["error"].get("message"))
         return result
-
-    async def cancel(self, run_id: str) -> bool:
-        return self.runner.cancel(run_id)
 
     async def get_settings(self) -> dict:
         return self.settings.load()
@@ -63,11 +56,16 @@ class Plugin:
         return self.settings.set(key, value)
 
     async def read_token_file(self, path: str) -> str:
-        """For OAuth setup: the token saved to a file on SD/USB, picked with the file picker."""
-        p = Path(path)
-        if not p.is_file() or p.stat().st_size > MAX_TOKEN_FILE:
-            raise ValueError("Pick a small text file containing the token.")
-        return p.read_text(errors="replace").strip()
+        """For OAuth setup: the token saved to a file on SD/USB, picked with the file picker.
+
+        Only regular files under the home dir or removable media. Accepts a
+        saved `rclone authorize` transcript too: the {...} token is pulled out.
+        """
+        p = Path(path).resolve()
+        roots = [Path(decky.DECKY_USER_HOME).resolve(), Path("/run/media"), Path("/media")]
+        if not any(p.is_relative_to(r) for r in roots) or not p.is_file() or not 0 < p.stat().st_size <= MAX_TOKEN_FILE:
+            raise ValueError("Pick the small text file with the token, from your home folder, an SD card or a USB stick.")
+        return extract_token(p.read_text(errors="replace"))
 
     async def environment(self) -> dict:
         """What the panel needs to decide between 'set up', 'install rclone' and normal operation."""

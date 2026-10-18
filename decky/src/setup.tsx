@@ -227,7 +227,8 @@ function SetupModal({ configured, closeModal }: { configured: boolean; closeModa
                 const problem = r?.problems?.[f.key];
                 if (r === null && !problem) return; // call() already showed the error
                 if (problem) return setError(problem);
-                if (step.index + 1 < step.provider.fields.length) go({ ...step, index: step.index + 1, values });
+                const next = step.provider.fields[step.index + 1];
+                if (next) go({ ...step, index: step.index + 1, values }, values[next.key] ?? "");
                 else go({ kind: "connect", provider: step.provider, values });
               }}
             >
@@ -243,7 +244,14 @@ function SetupModal({ configured, closeModal }: { configured: boolean; closeModa
       body = (
         <>
           <H>Connect {step.provider.label}</H>
-          <TextField label="Name for this remote" value={remoteName} onChange={(e) => setRemoteName(e.target.value)} />
+          <TextField
+            label="Name for this remote"
+            value={remoteName}
+            onChange={(e) => {
+              setRemoteName(e.target.value);
+              setUpdate(false); // "update" only ever means the remote that was found to exist
+            }}
+          />
           <TextField label="Folder on the remote for Memcard" value={folder} onChange={(e) => setFolder(e.target.value)} />
           {update && <P dim>Will update the existing remote "{remoteName}" in place.</P>}
           <DialogButton
@@ -257,13 +265,16 @@ function SetupModal({ configured, closeModal }: { configured: boolean; closeModa
               setBusy(false);
               if (r.result) return go({ kind: "done", spec: r.result.remote, experimental: step.provider.experimental });
               setError(r.error);
-              if (r.error?.message.includes("already exists")) setUpdate(true);
+              if (r.error?.code === "remote_exists") setUpdate(true);
             }}
           >
             {busy ? "Testing (write, read back, delete)…" : update ? "Update and connect" : "Connect"}
           </DialogButton>
           {!busy && error && (
-            <DialogButton style={{ marginTop: 6 }} onClick={() => go({ kind: "field", provider: step.provider, index: 0, values: step.values })}>
+            <DialogButton
+              style={{ marginTop: 6 }}
+              onClick={() => go({ kind: "field", provider: step.provider, index: 0, values: step.values }, step.values[step.provider.fields[0].key] ?? "")}
+            >
               Edit the settings
             </DialogButton>
           )}

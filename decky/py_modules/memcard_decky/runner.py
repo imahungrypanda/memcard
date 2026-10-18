@@ -102,6 +102,9 @@ class Runner:
             out["exit_code"] = await proc.wait()
             stderr = (await stderr_task).decode(errors="replace")
         finally:
+            if proc.returncode is None:  # we bailed out mid-stream: don't leave it running
+                proc.terminate()
+                await proc.wait()
             if run_id:
                 self.procs.pop(run_id, None)
         if out["result"] is None and out["error"] is None:
@@ -121,3 +124,9 @@ class Runner:
             return False
         proc.send_signal(signal.SIGTERM)
         return True
+
+
+def extract_token(text: str) -> str:
+    """The {...} token from a file that may hold the whole `rclone authorize` output."""
+    start, end = text.find("{"), text.rfind("}")
+    return text[start : end + 1] if 0 <= start < end else text.strip()

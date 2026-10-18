@@ -26,7 +26,8 @@ import {
   type Settings,
 } from "./backend";
 import { askResolutions } from "./conflicts";
-import { registerLaunchHooks } from "./launch";
+import { controller, registerLaunchHooks } from "./launch";
+import { describe } from "./launchController";
 import { installRclone, showSetup } from "./setup";
 import type { GroupPlan, GroupsData, MemcardError, SyncData } from "./types";
 
@@ -59,15 +60,17 @@ async function syncAndResolve(groups: string[] = []): Promise<void> {
   for (const r of results.filter((r) => r.status === "error" || r.status === "skipped")) {
     toast(`${r.group}: ${errorText(r.error)}`);
   }
+  let final = first.result;
   if (results.some((r) => r.conflicts.length)) {
     const resolve = await askResolutions(results, cachedGroups()?.machine.name ?? "this Deck");
     if (resolve.length) {
       const second = await memcard<SyncData>(["sync", ...groups, ...resolve]);
       if (second.error) return toast(errorText(second.error), "Memcard: sync failed");
+      final = second.result;
     }
   }
-  const moved = results.reduce((n, r) => n + r.pushed.length + r.pulled.length, 0);
-  toast(moved ? `Synced ${moved} file(s).` : "Everything is up to date.");
+  const d = describe(final);
+  toast(d.conflicts ? `${d.text}. ${d.conflicts} conflict(s) left for later.` : d.text);
 }
 
 function Content() {
@@ -120,6 +123,9 @@ function Content() {
   }
 
   const pending = Object.keys(groups?.pending ?? {});
+  // Never sync under a running game: core refuses too, this just explains it up front.
+  const playing = controller.isRunning();
+  const blocked = !!busy || playing;
   return (
     <>
       <PanelSection title="Status">
@@ -136,10 +142,16 @@ function Content() {
             </ButtonItem>
           </PanelSectionRow>
         )}
+        {playing && (
+          <PanelSectionRow>
+            <Field description="A game is running. Syncing waits until you quit it; that happens automatically." />
+          </PanelSectionRow>
+        )}
         {pending.length > 0 && (
           <PanelSectionRow>
             <ButtonItem
               layout="below"
+              disabled={blocked}
               description={`Waiting for a decision: ${pending.join(", ")}`}
               onClick={() => task("Resolving…", () => syncAndResolve(pending))}
             >
@@ -149,7 +161,7 @@ function Content() {
         )}
         {groups?.remote && (
           <PanelSectionRow>
-            <ButtonItem layout="below" disabled={!!busy} onClick={() => task("Syncing…", () => syncAndResolve())}>
+            <ButtonItem layout="below" disabled={blocked} onClick={() => task("Syncing…", () => syncAndResolve())}>
               Sync now
             </ButtonItem>
           </PanelSectionRow>
@@ -207,7 +219,7 @@ function Content() {
           <PanelSectionRow>
             <ButtonItem
               layout="below"
-              disabled={!!busy}
+              disabled={blocked}
               onClick={() =>
                 task("Checking…", async () => {
                   const r = await memcard<GroupPlan[]>(["status"]);

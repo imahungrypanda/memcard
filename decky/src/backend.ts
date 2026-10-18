@@ -2,7 +2,6 @@ import { callable } from "@decky/api";
 import type { GroupsData, RunResult } from "./types";
 
 const memcardCall = callable<[args: string[], stdin: string | null, runId: string | null], RunResult>("memcard");
-export const cancelRun = callable<[runId: string], boolean>("cancel");
 const getSettingsCall = callable<[], Settings>("get_settings");
 const setSettingCall = callable<[key: keyof Settings, value: boolean], Settings>("set_setting");
 export const readTokenFile = callable<[path: string], string>("read_token_file");
@@ -42,7 +41,8 @@ const listeners = new Set<(g: GroupsData | null) => void>();
 
 export async function refreshGroups(): Promise<GroupsData | null> {
   const r = await memcard<GroupsData>(["groups"]);
-  groups = r.result;
+  // Keep the last good mapping on a transient failure: the launch hook relies on it.
+  if (r.result || r.error?.code === "config") groups = r.result;
   listeners.forEach((l) => l(groups));
   return groups;
 }
