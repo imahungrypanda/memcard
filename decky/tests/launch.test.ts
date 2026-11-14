@@ -1,7 +1,7 @@
 // Launch/exit state machine, against a fake Steam. Run: node --test decky/tests/
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appidFromGameId, LaunchController, LET_THROUGH_MS, START_TIMEOUT_MS } from "../src/launchController.ts";
+import { appidFromGameId, describe, LaunchController, LET_THROUGH_MS, START_TIMEOUT_MS } from "../src/launchController.ts";
 
 const SHORTCUT = 3141592653;
 const GAME_ID = ((BigInt(SHORTCUT) << 32n) | 0x02000000n).toString();
@@ -229,4 +229,12 @@ test("the panel hears about games starting and stopping", () => {
   w.started(7);
   w.exited(7);
   assert.deepEqual(seen, [true, false]);
+});
+
+test("describe() spells out what moved", () => {
+  const g = (pushed: string[], pulled: string[]) => ({ group: "g", status: "ok", pushed, pulled, conflicts: [] });
+  const text = (...r: unknown[]) => describe({ results: r } as never).text;
+  assert.equal(text(g(["a"], [])), "1 save file uploaded");
+  assert.equal(text(g(["a", "b"], ["c"])), "2 save files uploaded, 1 save file downloaded");
+  assert.equal(text(g([], [])), "Already up to date");
 });
