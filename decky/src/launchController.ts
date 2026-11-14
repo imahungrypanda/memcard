@@ -174,6 +174,7 @@ export function describe(data: SyncData | null | undefined): { text: string; con
   const down = r.reduce((n, g) => n + g.pulled.length, 0);
   const conflicts = r.reduce((n, g) => n + g.conflicts.length, 0);
   const failed = r.filter((g) => g.status === "error" || g.status === "skipped").length;
-  const parts = [up && `${up} up`, down && `${down} down`].filter(Boolean);
-  return { text: parts.length ? parts.join(", ") : "Up to date", conflicts, failed };
+  const files = (n: number) => `${n} save file${n === 1 ? "" : "s"}`;
+  const parts = [up && `${files(up)} uploaded`, down && `${files(down)} downloaded`].filter(Boolean);
+  return { text: parts.length ? parts.join(", ") : "Already up to date", conflicts, failed };
 }
