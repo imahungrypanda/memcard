@@ -77,3 +77,24 @@ def test_memcards_own_rclone_wins_over_path(site, monkeypatch, tmp_path):
     monkeypatch.setattr(proc.shutil, "which", lambda name: str(other))
     install.install_rclone(Dirs.resolve())
     assert proc.find_tool("rclone") == str(install.bin_dir(Dirs.resolve()) / "rclone")
+
+
+def test_downloads_identify_as_memcard(monkeypatch):
+    """downloads.rclone.org refuses Python's default User-Agent with a 403."""
+    seen = []
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout):
+        seen.append(request.get_header("User-agent"))
+        return Response(b"rclone v1.0.0")
+
+    monkeypatch.setattr(install.urllib.request, "urlopen", fake_urlopen)
+    assert install._fetch("https://downloads.rclone.org/version.txt", 1024) == b"rclone v1.0.0"
+    assert seen == [install.USER_AGENT]
+    assert seen[0].startswith("memcard/")

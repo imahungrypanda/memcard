@@ -19,17 +19,21 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from . import __version__
 from .errors import MemcardError
 from .paths import Dirs
 
 BASE = "https://downloads.rclone.org/"
 ARCH = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
 MAX_ZIP = 200 * 1024 * 1024
+# downloads.rclone.org answers 403 to Python's default "Python-urllib/3.x" agent.
+USER_AGENT = f"memcard/{__version__}"
 
 
 def _fetch(url: str, limit: int = MAX_ZIP) -> bytes:
     try:
-        with urllib.request.urlopen(url, timeout=60) as r:
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=60) as r:
             data = r.read(limit + 1)
     except OSError as e:
         raise MemcardError("Couldn't download rclone.", hint="Check the internet connection and try again.", detail=f"{url}: {e}") from e
