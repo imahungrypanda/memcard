@@ -27,6 +27,7 @@ import {
 } from "./backend";
 import { askResolutions } from "./conflicts";
 import { controller, registerLaunchHooks } from "./launch";
+import { checkForUpdate, installUpdate, onUpdateState, startUpdateChecks, updateState } from "./updater";
 import { describe } from "./launchController";
 import { installRclone, showSetup } from "./setup";
 import type { GroupPlan, GroupsData, MemcardError, SyncData } from "./types";
@@ -81,6 +82,8 @@ function Content() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<MemcardError | null>(null);
   const [playing, setPlaying] = useState(controller.isRunning());
+  const [upd, setUpd] = useState(updateState());
+  const [checking, setChecking] = useState(false);
 
   const reload = async () => {
     const env = await environment();
@@ -91,10 +94,12 @@ function Content() {
   useEffect(() => {
     const off = onGroups(setGroups);
     const offRunning = controller.onChange(() => setPlaying(controller.isRunning()));
+    const offUpdates = onUpdateState(setUpd);
     reload();
     return () => {
       off();
       offRunning();
+      offUpdates();
     };
   }, []);
 
@@ -196,6 +201,47 @@ function Content() {
             label="Notify after syncing"
             checked={settings.notify}
             onChange={async (v) => setSettings(await updateSetting("notify", v))}
+          />
+        </PanelSectionRow>
+      </PanelSection>
+
+      <PanelSection title="Updates">
+        {upd.update ? (
+          <PanelSectionRow>
+            <ButtonItem layout="below" description={upd.installed ? `Installed: ${upd.installed}` : undefined} onClick={() => installUpdate(upd.update!)}>
+              Update to {upd.update.version}
+            </ButtonItem>
+          </PanelSectionRow>
+        ) : (
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              disabled={checking}
+              description={
+                upd.error
+                  ? `✗ ${upd.error}`
+                  : upd.checked
+                    ? `Up to date${upd.installed ? ` (${upd.installed})` : ""}.`
+                    : upd.installed
+                      ? `Installed: ${upd.installed}`
+                      : undefined
+              }
+              onClick={async () => {
+                setChecking(true);
+                await checkForUpdate({ quiet: true });
+                setChecking(false);
+              }}
+            >
+              {checking ? "Checking…" : "Check for updates"}
+            </ButtonItem>
+          </PanelSectionRow>
+        )}
+        <PanelSectionRow>
+          <ToggleField
+            label="Check automatically"
+            description="Looks for a new version on GitHub when Steam starts and twice a day."
+            checked={settings.check_updates}
+            onChange={async (v) => setSettings(await updateSetting("check_updates", v))}
           />
         </PanelSectionRow>
       </PanelSection>
@@ -318,6 +364,7 @@ export default definePlugin(() => {
     if (env.configured) refreshGroups();
   });
   const unregister = registerLaunchHooks();
+  const stopUpdateChecks = startUpdateChecks();
   return {
     name: "Memcard",
     titleView: <div className={staticClasses.Title}>Memcard</div>,
@@ -325,6 +372,7 @@ export default definePlugin(() => {
     icon: <FaSdCard />,
     onDismount() {
       unregister();
+      stopUpdateChecks();
     },
   };
 });

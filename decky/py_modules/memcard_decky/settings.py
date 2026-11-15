@@ -10,6 +10,7 @@ from typing import Any
 DEFAULTS: dict[str, Any] = {
     "auto_sync": True,  # sync before launch and after exit for mapped games
     "notify": True,  # toast after each automatic sync
+    "check_updates": True,  # look for a newer Memcard release on GitHub (on load, then every 12 h)
 }
 
 

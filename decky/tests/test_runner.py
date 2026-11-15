@@ -127,7 +127,7 @@ def test_clean_env_drops_pyinstaller_leaks():
 
 def test_settings_defaults_and_validation(tmp_path):
     s = Settings(str(tmp_path))
-    assert s.load() == {"auto_sync": True, "notify": True}
+    assert s.load() == {"auto_sync": True, "notify": True, "check_updates": True}
     assert s.set("auto_sync", False)["auto_sync"] is False
     assert Settings(str(tmp_path)).load()["auto_sync"] is False
     with pytest.raises(ValueError):
