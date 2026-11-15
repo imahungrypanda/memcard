@@ -22,7 +22,13 @@ See `docs/design.md`.
 - [x] `cli` with `--json` NDJSON events + exit codes
 - [x] `docs/providers/*.md`, `docs/install.md`
 - [x] Single-file zipapp build (`scripts/build-zipapp.sh`)
-- [ ] Hardware test pass (checklist in `docs/install.md` §8)
+- [x] Hardware test pass, first round (2026-11-14, Steam Machine + Steam Deck, Nextcloud)
+  - Verified: Decky install from URL, setup wizard, Install rclone (after the User-Agent fix),
+    first sync, launch intercept (single launch), exit push after Steam menu → Exit game,
+    missing-saves guard + restore from cloud, second machine (Deck, SD card) merging with the first.
+  - Fixed from testing: rclone download 403 (#6), game name in toasts (#7), conflict prompt
+    wording/"Deck" assumptions (#8), conflict buttons overflowing (#9).
+  - Still to check: conflict prompt layout after #9, offline launch, double press, two-sided conflict.
 
 ## Phase 2 — memcard-decky
 Decision (2026-10-18): the plugin intercepts Steam's game launch (cancel → sync → relaunch) and
@@ -47,6 +53,12 @@ launch options, and `%command%` expansion for shortcuts is unverified. `wrap` st
 - [x] Setup wizard: existing remotes, provider fields one at a time, validate, apply, OAuth token paste/file, mapped errors
 - [x] Build script → installable zip (bundles the memcard zipapp); backend unit tests; tsc + rollup build in CI
 - [x] docs/install.md: Deck section uses the plugin
+
+## Next
+- [x] MIT license, public repo, release on every green main (`release.yml`, install from URL)
+- [ ] Custom Decky store so updates show up in Decky
+- [ ] Show error `detail` in the panel, not just the summary
+- [ ] `memcard history`: list/restore earlier cloud versions of a group
 
 ## Phase 3 — memcard-gui
 - [ ] Pick GTK4 vs Qt; Flatpak manifest with rsync + rclone bundled
