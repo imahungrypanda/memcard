@@ -6,6 +6,7 @@ on:
     workflows: [ci]
     types: [completed]
     branches: [main]
+  workflow_dispatch: # Actions → release → Run workflow: publish main as-is
 
 permissions:
   contents: write
@@ -16,12 +17,14 @@ concurrency:
 
 jobs:
   release:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -49,5 +52,5 @@ jobs:
         run: |
           v=${{ steps.v.outputs.version }}
           gh release create "v$v" dist/memcard-decky.zip dist/memcard \
-            --target "${{ github.event.workflow_run.head_sha }}" \
+            --target "${{ github.event.workflow_run.head_sha || github.sha }}" \
             --title "Memcard $v" --generate-notes --latest
