@@ -1,0 +1,53 @@
+name: release
+# Every green CI run on main publishes a release. The Decky plugin installs and updates
+# from releases/latest/download/memcard-decky.zip ("Install plugin from URL").
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Version
+        id: v
+        # major.minor from decky/package.json, patch = this workflow's run number,
+        # so every release is newer than the last and Decky shows which one is installed.
+        run: |
+          base=$(node -p "require('./decky/package.json').version.split('.').slice(0,2).join('.')")
+          echo "version=$base.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+      - name: Stamp version
+        run: |
+          v=${{ steps.v.outputs.version }}
+          node -e "const f='decky/package.json',p=require('./'+f);p.version='$v';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+          sed -i "s/^__version__ = .*/__version__ = \"$v\"/" core/src/memcard/__init__.py
+          sed -i "s/^version = .*/version = \"$v\"/" core/pyproject.toml
+      - name: Build
+        run: scripts/build-decky.sh
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=${{ steps.v.outputs.version }}
+          gh release create "v$v" dist/memcard-decky.zip dist/memcard \
+            --target "${{ github.event.workflow_run.head_sha }}" \
+            --title "Memcard $v" --generate-notes --latest

@@ -18,6 +18,7 @@ rm -rf "$out"
 mkdir -p "$pkg/dist" "$pkg/bin"
 cp dist/index.js "$pkg/dist/"
 cp main.py plugin.json package.json README.md "$pkg/"
+cp "$root/LICENSE" "$pkg/"
 cp -R py_modules "$pkg/py_modules"
 find "$pkg/py_modules" -name __pycache__ -prune -exec rm -rf {} +
 cp "$root/dist/memcard" "$pkg/bin/memcard"

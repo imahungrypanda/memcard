@@ -17,13 +17,28 @@ storage through rclone. Put the Steam Deck down, pick up on the PC, keep playing
 | Part | Status |
 |---|---|
 | `memcard-core`: library + CLI (`core/`) | ✅ built, tested |
-| `memcard-decky`: Steam Deck Game Mode plugin | next |
+| `memcard-decky`: Game Mode plugin (Steam Deck, Steam Machine) | ✅ in testing |
 | `memcard-gui`: desktop app (Flatpak) for Bazzite | after Decky |
 
 **Start here:** [docs/install.md](docs/install.md) · Design: [docs/design.md](docs/design.md) ·
 Providers: [Nextcloud](docs/providers/nextcloud.md), [Google Drive](docs/providers/google-drive.md),
 [Box](docs/providers/box.md), [WebDAV](docs/providers/webdav-generic.md),
 [iCloud (experimental)](docs/providers/icloud.md)
+
+## Install
+
+**Game Mode (Steam Deck, Steam Machine):** install [Decky Loader](https://decky.xyz), turn on
+Decky ⚙ → **Developer mode**, then Developer → **Install plugin from URL**:
+
+```
+https://github.com/imahungrypanda/memcard/releases/latest/download/memcard-decky.zip
+```
+
+Install from the same URL again to update. Every merge to `main` publishes a release.
+
+**Command line (Bazzite, or any Linux):** download `memcard` from the
+[latest release](https://github.com/imahungrypanda/memcard/releases/latest); see
+[docs/install.md](docs/install.md).
 
 ## Development
 
@@ -33,3 +48,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest            # integration tests need GNU rsync + rclone (macOS: brew install rsync rclone)
 ../scripts/build-zipapp.sh  # -> dist/memcard
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

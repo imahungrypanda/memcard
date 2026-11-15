@@ -49,16 +49,18 @@ scp dist/memcard bazzite-user@bazzite:~/memcard
 
 ---
 
-## 2. Steam Deck (Decky plugin)
+## 2. Steam Deck / Steam Machine (Decky plugin)
 
 You need [Decky Loader](https://decky.xyz) installed.
 
 1. **Turn on developer mode in Decky:** Quick Access (`…` button) → Decky (plug icon) → ⚙
    Settings → **Developer mode** on.
-2. **Install the plugin:** Decky ⚙ → **Developer** → **Install plugin from ZIP file** →
-   pick `~/Downloads/memcard-decky.zip`.
+2. **Install the plugin:** Decky ⚙ → **Developer** → **Install plugin from URL** →
+   `https://github.com/imahungrypanda/memcard/releases/latest/download/memcard-decky.zip`.
+   To update later, install from the same URL again; settings and saves are kept.
+   (A local build works too: **Install plugin from ZIP file** → `memcard-decky.zip`.)
 3. **Open Memcard** in the Quick Access menu and press **Set up Memcard**:
-   - **Name this Deck**, e.g. "Steam Deck".
+   - **Name this machine**, e.g. "Steam Deck" or "Steam Machine".
    - **Choose where your saves live.** For Nextcloud, first make an app password in a browser:
      **avatar → Settings → Security → Devices & sessions → Create new app password**.
      Then enter the username, the URL (`https://YOUR-SERVER/remote.php/dav/files/YOUR-USERNAME/`)
