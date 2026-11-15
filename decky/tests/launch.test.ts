@@ -228,7 +228,8 @@ test("the panel hears about games starting and stopping", () => {
   w.c.onChange(() => seen.push(w.c.isRunning()));
   w.started(7);
   w.exited(7);
-  assert.deepEqual(seen, [true, false]);
+  // onChange also fires for sync start/finish; the running flag must go true, then false.
+  assert.deepEqual(seen.filter((v, i) => i === 0 || v !== seen[i - 1]), [true, false]);
 });
 
 test("describe() spells out what moved", () => {
@@ -237,4 +238,19 @@ test("describe() spells out what moved", () => {
   assert.equal(text(g(["a"], [])), "1 save file uploaded");
   assert.equal(text(g(["a", "b"], ["c"])), "2 save files uploaded, 1 save file downloaded");
   assert.equal(text(g([], [])), "Already up to date");
+});
+
+test("isBusy covers the whole launch: before-launch sync, the game, and the after-exit sync", async () => {
+  const w = world();
+  assert.equal(w.c.isBusy(), false);
+  w.c.onGameActionStart(1, GAME_ID, "LaunchApp", 0);
+  assert.equal(w.c.isBusy(), true, "before-launch sync in flight");
+  await w.finishSync();
+  assert.equal(w.c.isBusy(), true, "relaunch pending");
+  w.c.onLifetime(SHORTCUT, 7, true);
+  assert.equal(w.c.isBusy(), true, "game running");
+  w.c.onLifetime(SHORTCUT, 7, false);
+  assert.equal(w.c.isBusy(), true, "after-exit sync in flight");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(w.c.isBusy(), false);
 });

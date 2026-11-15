@@ -12,7 +12,7 @@ export const ASSET = "memcard-decky.zip";
 export interface Update {
   version: string;
   artifact: string; // zip URL
-  hash: string; // sha256 hex of the zip; Decky refuses a download that doesn't match
+  hash: string; // sha256 hex of the zip; Decky won't unpack a download that doesn't match
   page: string; // release notes
 }
 

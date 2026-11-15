@@ -83,6 +83,7 @@ function Content() {
   const [error, setError] = useState<MemcardError | null>(null);
   const [playing, setPlaying] = useState(controller.isRunning());
   const [upd, setUpd] = useState(updateState());
+  const [launchBusy, setLaunchBusy] = useState(controller.isBusy());
   const [checking, setChecking] = useState(false);
 
   const reload = async () => {
@@ -93,7 +94,10 @@ function Content() {
 
   useEffect(() => {
     const off = onGroups(setGroups);
-    const offRunning = controller.onChange(() => setPlaying(controller.isRunning()));
+    const offRunning = controller.onChange(() => {
+      setPlaying(controller.isRunning());
+      setLaunchBusy(controller.isBusy());
+    });
     const offUpdates = onUpdateState(setUpd);
     reload();
     return () => {
@@ -208,7 +212,12 @@ function Content() {
       <PanelSection title="Updates">
         {upd.update ? (
           <PanelSectionRow>
-            <ButtonItem layout="below" description={upd.installed ? `Installed: ${upd.installed}` : undefined} onClick={() => installUpdate(upd.update!)}>
+            <ButtonItem
+              layout="below"
+              disabled={launchBusy || !!busy}
+              description={launchBusy ? "Available after you quit the game and its saves finish syncing." : upd.installed ? `Installed: ${upd.installed}` : undefined}
+              onClick={() => installUpdate(upd.update!)}
+            >
               Update to {upd.update.version}
             </ButtonItem>
           </PanelSectionRow>
@@ -241,7 +250,10 @@ function Content() {
             label="Check automatically"
             description="Looks for a new version on GitHub when Steam starts and twice a day."
             checked={settings.check_updates}
-            onChange={async (v) => setSettings(await updateSetting("check_updates", v))}
+            onChange={async (v) => {
+              setSettings(await updateSetting("check_updates", v));
+              if (v) checkForUpdate({ quiet: true });
+            }}
           />
         </PanelSectionRow>
       </PanelSection>

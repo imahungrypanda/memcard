@@ -1,10 +1,12 @@
-import { toaster } from "@decky/api";
+import { fetchNoCors, toaster } from "@decky/api";
 import { currentSettings, environment } from "./backend";
 import { controller } from "./launch";
 import { availableUpdate, RELEASES_API, type Update } from "./updates";
 
 // Checks GitHub for a newer Memcard on load and every 12 hours, toasts once per version, and
 // installs through Decky's own installer (its confirm prompt + SHA-256 check). See updates.ts.
+// Decky removes the old version before it checks the hash, so a failed update leaves no Memcard
+// until it's reinstalled from the URL (settings and saves are untouched).
 
 const FIRST_CHECK_MS = 60_000; // let Steam finish starting up first
 const EVERY_MS = 12 * 60 * 60 * 1000;
@@ -38,11 +40,14 @@ export function onUpdateState(l: (s: UpdateState) => void): () => void {
 export async function checkForUpdate(opts: { quiet?: boolean } = {}): Promise<UpdateState> {
   try {
     const installed = state.installed ?? (await environment()).version ?? null;
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), 15_000);
+    // fetchNoCors goes through Decky's backend, so Steam's browser CORS rules don't apply.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("GitHub didn't answer.")), 15_000);
+    });
     let release: unknown;
     try {
-      const res = await fetch(RELEASES_API, { headers: { Accept: "application/vnd.github+json" }, signal: abort.signal });
+      const res = await Promise.race([fetchNoCors(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } }), timeout]);
       if (!res.ok) throw new Error(res.status === 403 ? "GitHub is rate-limiting update checks; try later." : `GitHub answered ${res.status}.`);
       release = await res.json();
     } finally {
@@ -50,11 +55,11 @@ export async function checkForUpdate(opts: { quiet?: boolean } = {}): Promise<Up
     }
     set({ installed, update: availableUpdate(installed, release), checked: new Date(), error: null });
   } catch (e) {
-    set({ checked: new Date(), error: e instanceof Error && e.name !== "AbortError" ? e.message : "Couldn't reach GitHub." });
+    set({ checked: new Date(), error: e instanceof Error && e.message ? e.message : "Couldn't reach GitHub." });
   }
   const u = state.update;
-  // Never toast over a game; the next check (or the panel) will show it.
-  if (!opts.quiet && u && toasted !== u.version && !controller.isRunning()) {
+  // Never toast over a game or a launch/exit sync; the next check (or the panel) will show it.
+  if (!opts.quiet && u && toasted !== u.version && !controller.isBusy()) {
     toasted = u.version;
     toaster.toast({
       title: "Memcard update available",
@@ -68,6 +73,11 @@ export async function checkForUpdate(opts: { quiet?: boolean } = {}): Promise<Up
 
 /** Hand the zip to Decky's installer. Decky shows its own confirm prompt and checks the hash. */
 export function installUpdate(u: Update): boolean {
+  // Updating reloads the plugin: it would kill a launch/exit sync and drop the launch hook.
+  if (controller.isBusy()) {
+    toaster.toast({ title: "Memcard", body: "Update after you quit the game and its saves finish syncing.", duration: 6000 });
+    return false;
+  }
   const backend = (window as unknown as { DeckyBackend?: { call: (route: string, ...args: unknown[]) => Promise<unknown> } })
     .DeckyBackend;
   if (!backend?.call) {

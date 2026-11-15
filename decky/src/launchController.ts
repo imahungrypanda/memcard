@@ -57,6 +57,7 @@ export class LaunchController {
   private letThrough = new Map<number, number>(); // appid -> expiry
   private sessions = new Map<number, Session>();
   private lastLaunched: number | null = null;
+  private exiting = 0; // --after-exit syncs in flight
   private endedInstance = new Map<number, number>(); // appid -> instance whose exit closed its session
   private listeners = new Set<() => void>();
   private deps: Deps;
@@ -67,6 +68,14 @@ export class LaunchController {
 
   isRunning(appid?: number): boolean {
     return appid === undefined ? this.running.size > 0 : this.running.has(appid);
+  }
+
+  /**
+   * A game is running, or a launch/exit sync is in flight or still to come. Anything that would
+   * reload the plugin (an update) must wait: it would kill the sync and drop the launch hook.
+   */
+  isBusy(): boolean {
+    return this.running.size > 0 || this.pending.size > 0 || this.sessions.size > 0 || this.exiting > 0;
   }
 
   /** At startup: games already running (e.g. the plugin was reloaded mid-game). */
@@ -105,6 +114,7 @@ export class LaunchController {
 
     d.cancel(actionId); // must happen synchronously, or Steam carries on
     this.pending.add(appid);
+    this.changed();
     this.lastLaunched = appid;
     this.endSession(appid); // a previous session that never reported its exit
     const session: Session = { id: d.newId(), started: false };
@@ -114,6 +124,7 @@ export class LaunchController {
       .catch((e) => d.notify(`Launching with local saves: ${String(e)}`))
       .finally(() => {
         this.pending.delete(appid);
+        this.changed();
         this.letThrough.set(appid, d.now() + LET_THROUGH_MS);
         session.watchdog = d.setTimer(() => {
           // The relaunch never became a running game (refused, a dialog backed out of…).
@@ -153,8 +164,20 @@ export class LaunchController {
     } else if (this.deps.autoSync() && this.deps.isMapped(appid)) {
       // No session: we lost it (plugin reload, watchdog fired before a slow start).
       // An id-less --after-exit clears whatever marker is left and pushes the saves.
-      this.deps.afterExit(appid, null).catch((e) => this.deps.notify(`Saves not uploaded yet: ${String(e)}`));
+      this.exit(appid, null);
     }
+  }
+
+  private exit(appid: number, launchId: string | null): void {
+    this.exiting++;
+    this.changed();
+    this.deps
+      .afterExit(appid, launchId)
+      .catch((e) => this.deps.notify(`Saves not uploaded yet: ${String(e)}`))
+      .finally(() => {
+        this.exiting--;
+        this.changed();
+      });
   }
 
   /** Send the one --after-exit for this app's session, if there is one. */
@@ -163,7 +186,7 @@ export class LaunchController {
     if (!session) return;
     this.sessions.delete(appid);
     if (session.watchdog !== undefined) this.deps.clearTimer(session.watchdog);
-    this.deps.afterExit(appid, session.id).catch((e) => this.deps.notify(`Saves not uploaded yet: ${String(e)}`));
+    this.exit(appid, session.id);
   }
 }
 
