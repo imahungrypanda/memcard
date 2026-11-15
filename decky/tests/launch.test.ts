@@ -254,3 +254,14 @@ test("isBusy covers the whole launch: before-launch sync, the game, and the afte
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(w.c.isBusy(), false);
 });
+
+test("a lost exit report doesn't block updates once the game is no longer running", async () => {
+  const w = world();
+  w.c.onGameActionStart(1, GAME_ID, "LaunchApp", 0);
+  await w.finishSync();
+  w.c.onLifetime(SHORTCUT, 7, true);
+  w.c.onLifetime(SHORTCUT, 8, false); // exit reported with another instance id: session stays open
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(w.c.isRunning(), false);
+  assert.equal(w.c.isBusy(), false);
+});

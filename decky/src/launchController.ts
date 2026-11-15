@@ -75,7 +75,15 @@ export class LaunchController {
    * reload the plugin (an update) must wait: it would kill the sync and drop the launch hook.
    */
   isBusy(): boolean {
-    return this.running.size > 0 || this.pending.size > 0 || this.sessions.size > 0 || this.exiting > 0;
+    // A started session is covered by `running` while its game runs; counting it here too would
+    // block updates forever if its exit report is lost (wrong instance, appid 0). Unstarted ones
+    // are bounded by their watchdog.
+    return (
+      this.running.size > 0 ||
+      this.pending.size > 0 ||
+      this.exiting > 0 ||
+      [...this.sessions.values()].some((s) => !s.started)
+    );
   }
 
   /** At startup: games already running (e.g. the plugin was reloaded mid-game). */

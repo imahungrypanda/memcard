@@ -47,9 +47,12 @@ export async function checkForUpdate(opts: { quiet?: boolean } = {}): Promise<Up
     });
     let release: unknown;
     try {
-      const res = await Promise.race([fetchNoCors(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } }), timeout]);
-      if (!res.ok) throw new Error(res.status === 403 ? "GitHub is rate-limiting update checks; try later." : `GitHub answered ${res.status}.`);
-      release = await res.json();
+      const get = async () => {
+        const res = await fetchNoCors(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } });
+        if (!res.ok) throw new Error(res.status === 403 ? "GitHub is rate-limiting update checks; try later." : `GitHub answered ${res.status}.`);
+        return res.json();
+      };
+      release = await Promise.race([get(), timeout]); // the timeout covers the body too
     } finally {
       clearTimeout(timer);
     }
