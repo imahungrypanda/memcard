@@ -38,7 +38,7 @@ async function beforeLaunch(appid: number, launchId: string): Promise<void> {
     if (notify) toast(title, describe(first.result).text);
     return;
   }
-  const resolve = await askResolutions(results, cachedGroups()?.machine.name ?? "this Deck");
+  const resolve = await askResolutions(results, cachedGroups()?.machine ?? { id: "", name: "this machine" });
   if (!resolve.length) return toast(title, "Conflicts left for later; those saves weren't touched.");
   // Still the pre-launch sync (same launch id), so core allows it while the launch is marked.
   const second = await memcard<SyncData>([...hook, ...resolve]);

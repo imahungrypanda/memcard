@@ -96,9 +96,9 @@ function SetupModal({ configured, closeModal }: { configured: boolean; closeModa
     case "name":
       body = (
         <>
-          <H>Name this Deck</H>
+          <H>Name this machine</H>
           <P dim>Your other machines show this name in conflict prompts ("last written by …").</P>
-          <TextField label="Machine name" value={text || ""} placeholder="Steam Deck" onChange={(e) => setText(e.target.value)} />
+          <TextField label="Machine name" value={text || ""} placeholder="e.g. Steam Machine, Steam Deck, Desktop" onChange={(e) => setText(e.target.value)} />
           <DialogButton
             disabled={busy}
             style={{ marginTop: 10 }}

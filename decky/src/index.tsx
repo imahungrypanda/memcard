@@ -62,7 +62,7 @@ async function syncAndResolve(groups: string[] = []): Promise<void> {
   }
   let final = first.result;
   if (results.some((r) => r.conflicts.length)) {
-    const resolve = await askResolutions(results, cachedGroups()?.machine.name ?? "this Deck");
+    const resolve = await askResolutions(results, cachedGroups()?.machine ?? { id: "", name: "this machine" });
     if (resolve.length) {
       const second = await memcard<SyncData>(["sync", ...groups, ...resolve]);
       if (second.error) return toast(errorText(second.error), "Memcard: sync failed");

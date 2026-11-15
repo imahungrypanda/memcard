@@ -35,7 +35,7 @@ jobs:
       - name: Backend tests
         run: python -m pytest -q decky/tests
       - name: Launch controller tests
-        run: node --test decky/tests/launch.test.ts
+        run: node --test decky/tests/*.test.ts
       - name: Typecheck and build
         working-directory: decky
         run: |
