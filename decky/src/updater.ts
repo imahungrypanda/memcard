@@ -16,10 +16,13 @@ export interface UpdateState {
   installed: string | null;
   update: Update | null;
   checked: Date | null;
+  checking: boolean;
   error: string | null;
 }
 
-let state: UpdateState = { installed: null, update: null, checked: null, error: null };
+let state: UpdateState = { installed: null, update: null, checked: null, checking: false, error: null };
+let inFlight: Promise<UpdateState> | null = null;
+const STALE_MS = 15 * 60 * 1000;
 let toasted: string | null = null;
 const listeners = new Set<(s: UpdateState) => void>();
 
@@ -37,13 +40,34 @@ export function onUpdateState(l: (s: UpdateState) => void): () => void {
   return () => listeners.delete(l);
 }
 
-export async function checkForUpdate(opts: { quiet?: boolean } = {}): Promise<UpdateState> {
+/** The installed version, for the panel footer; read once at load. */
+export async function loadInstalledVersion(): Promise<void> {
   try {
-    const installed = state.installed ?? (await environment()).version ?? null;
+    set({ installed: (await environment()).version || null });
+  } catch {
+    // backend not ready; checkForUpdate will try again
+  }
+}
+
+/** Opening the panel refreshes a check older than 15 minutes, so the answer is usually already there. */
+export function checkIfStale(): void {
+  if (!state.checked || Date.now() - state.checked.getTime() > STALE_MS) checkForUpdate({ quiet: true });
+}
+
+/** One check at a time: a press while a background check runs waits for that one. */
+export function checkForUpdate(opts: { quiet?: boolean } = {}): Promise<UpdateState> {
+  inFlight ??= check(opts).finally(() => (inFlight = null));
+  return inFlight;
+}
+
+async function check(opts: { quiet?: boolean }): Promise<UpdateState> {
+  set({ checking: true });
+  try {
+    const installed = state.installed ?? ((await environment()).version || null);
     // fetchNoCors goes through Decky's backend, so Steam's browser CORS rules don't apply.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("GitHub didn't answer.")), 15_000);
+      timer = setTimeout(() => reject(new Error("GitHub didn't answer. Try again later.")), 10_000);
     });
     let release: unknown;
     try {
@@ -56,9 +80,9 @@ export async function checkForUpdate(opts: { quiet?: boolean } = {}): Promise<Up
     } finally {
       clearTimeout(timer);
     }
-    set({ installed, update: availableUpdate(installed, release), checked: new Date(), error: null });
+    set({ installed, update: availableUpdate(installed, release), checked: new Date(), checking: false, error: null });
   } catch (e) {
-    set({ checked: new Date(), error: e instanceof Error && e.message ? e.message : "Couldn't reach GitHub." });
+    set({ checked: new Date(), checking: false, error: e instanceof Error && e.message ? e.message : "Couldn't reach GitHub." });
   }
   const u = state.update;
   // Never toast over a game or a launch/exit sync; the next check (or the panel) will show it.

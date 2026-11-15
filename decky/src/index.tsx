@@ -27,7 +27,7 @@ import {
 } from "./backend";
 import { askResolutions } from "./conflicts";
 import { controller, registerLaunchHooks } from "./launch";
-import { checkForUpdate, installUpdate, onUpdateState, startUpdateChecks, updateState } from "./updater";
+import { checkForUpdate, checkIfStale, installUpdate, loadInstalledVersion, onUpdateState, startUpdateChecks, updateState } from "./updater";
 import { describe } from "./launchController";
 import { installRclone, showSetup } from "./setup";
 import type { GroupPlan, GroupsData, MemcardError, SyncData } from "./types";
@@ -74,6 +74,16 @@ async function syncAndResolve(groups: string[] = []): Promise<void> {
   toast(d.conflicts ? `${d.text}. ${d.conflicts} conflict(s) left for later.` : d.text);
 }
 
+function VersionFooter() {
+  const [installed, setInstalled] = useState(updateState().installed);
+  useEffect(() => onUpdateState((s) => setInstalled(s.installed)), []);
+  return (
+    <div style={{ textAlign: "center", fontSize: "0.75em", opacity: 0.5, padding: "12px 0 4px" }}>
+      Memcard {installed ?? ""}
+    </div>
+  );
+}
+
 function Content() {
   const [groups, setGroups] = useState<GroupsData | null>(cachedGroups());
   const [configured, setConfigured] = useState(true);
@@ -84,7 +94,6 @@ function Content() {
   const [playing, setPlaying] = useState(controller.isRunning());
   const [upd, setUpd] = useState(updateState());
   const [launchBusy, setLaunchBusy] = useState(controller.isBusy());
-  const [checking, setChecking] = useState(false);
 
   const reload = async () => {
     const env = await environment();
@@ -99,6 +108,7 @@ function Content() {
       setLaunchBusy(controller.isBusy());
     });
     const offUpdates = onUpdateState(setUpd);
+    if (currentSettings().check_updates) checkIfStale();
     reload();
     return () => {
       off();
@@ -130,6 +140,7 @@ function Content() {
             Set up Memcard
           </ButtonItem>
         </PanelSectionRow>
+        <VersionFooter />
       </PanelSection>
     );
   }
@@ -205,55 +216,6 @@ function Content() {
             label="Notify after syncing"
             checked={settings.notify}
             onChange={async (v) => setSettings(await updateSetting("notify", v))}
-          />
-        </PanelSectionRow>
-      </PanelSection>
-
-      <PanelSection title="Updates">
-        {upd.update ? (
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              disabled={launchBusy || !!busy}
-              description={launchBusy ? "Available after you quit the game and its saves finish syncing." : upd.installed ? `Installed: ${upd.installed}` : undefined}
-              onClick={() => installUpdate(upd.update!)}
-            >
-              Update to {upd.update.version}
-            </ButtonItem>
-          </PanelSectionRow>
-        ) : (
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              disabled={checking}
-              description={
-                upd.error
-                  ? `✗ ${upd.error}`
-                  : upd.checked
-                    ? `Up to date${upd.installed ? ` (${upd.installed})` : ""}.`
-                    : upd.installed
-                      ? `Installed: ${upd.installed}`
-                      : undefined
-              }
-              onClick={async () => {
-                setChecking(true);
-                await checkForUpdate({ quiet: true });
-                setChecking(false);
-              }}
-            >
-              {checking ? "Checking…" : "Check for updates"}
-            </ButtonItem>
-          </PanelSectionRow>
-        )}
-        <PanelSectionRow>
-          <ToggleField
-            label="Check automatically"
-            description="Looks for a new version on GitHub when Steam starts and twice a day."
-            checked={settings.check_updates}
-            onChange={async (v) => {
-              setSettings(await updateSetting("check_updates", v));
-              if (v) checkForUpdate({ quiet: true });
-            }}
           />
         </PanelSectionRow>
       </PanelSection>
@@ -366,12 +328,59 @@ function Content() {
           </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
+
+      <PanelSection title="Updates">
+        {upd.update ? (
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              disabled={launchBusy || !!busy}
+              description={launchBusy ? "Available after you quit the game and its saves finish syncing." : "Decky will ask you to confirm."}
+              onClick={() => installUpdate(upd.update!)}
+            >
+              Update to {upd.update.version}
+            </ButtonItem>
+          </PanelSectionRow>
+        ) : (
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              description={
+                upd.checking
+                  ? "Asking GitHub for the latest version…"
+                  : upd.error
+                    ? `✗ ${upd.error}`
+                    : upd.checked
+                      ? `Up to date. Checked ${upd.checked.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`
+                      : undefined
+              }
+              onClick={() => checkForUpdate({ quiet: true })}
+            >
+              {upd.checking ? "Checking…" : "Check for updates"}
+            </ButtonItem>
+          </PanelSectionRow>
+        )}
+        <PanelSectionRow>
+          <ToggleField
+            label="Check automatically"
+            description="Looks for a new version on GitHub when Steam starts and twice a day."
+            checked={settings.check_updates}
+            onChange={async (v) => {
+              setSettings(await updateSetting("check_updates", v));
+              if (v) checkForUpdate({ quiet: true });
+            }}
+          />
+        </PanelSectionRow>
+      </PanelSection>
+
+      <VersionFooter />
     </>
   );
 }
 
 export default definePlugin(() => {
   loadSettings();
+  loadInstalledVersion();
   environment().then((env) => {
     if (env.configured) refreshGroups();
   });
