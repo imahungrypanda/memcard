@@ -29,6 +29,21 @@ function Side({ label, entry }: { label: string; entry: FileEntry | null }) {
   );
 }
 
+// Steam's DialogButton is a fixed-height, single-line, nowrap button by default; let the two-line
+// label + result wrap inside the modal instead of overflowing it.
+const BUTTON = {
+  width: "100%",
+  minWidth: 0,
+  height: "auto",
+  minHeight: 0,
+  lineHeight: 1.3,
+  whiteSpace: "normal",
+  overflow: "hidden",
+  textAlign: "left",
+  padding: "8px 12px",
+  boxSizing: "border-box",
+} as const;
+
 interface Props {
   prompt: Prompt;
   index: number;
@@ -51,7 +66,7 @@ function ConflictModal({ prompt: p, index, total, onChoose, closeModal }: Props)
         {p.title} {total > 1 ? `(${index + 1} of ${total})` : ""}
       </div>
       <div style={{ marginBottom: 10, opacity: 0.85 }}>{p.explain}</div>
-      <div style={{ maxHeight: 160, overflowY: "auto", marginBottom: 10 }}>
+      <div style={{ maxHeight: 120, overflowY: "auto", marginBottom: 10 }}>
         {p.files.slice(0, 6).map((f) => (
           <div key={f.path} style={{ marginBottom: 8 }}>
             <div style={{ fontFamily: "monospace", fontSize: "0.85em", marginBottom: 3 }}>{f.path}</div>
@@ -63,10 +78,10 @@ function ConflictModal({ prompt: p, index, total, onChoose, closeModal }: Props)
         ))}
         {p.files.length > 6 && <div style={{ opacity: 0.7 }}>…and {p.files.length - 6} more files.</div>}
       </div>
-      <Focusable style={{ display: "flex", flexDirection: "column", gap: 6 }} flow-children="vertical">
+      <Focusable style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%" }} flow-children="vertical">
         {p.options.map((o) => (
-          <DialogButton key={o.label} style={{ textAlign: "left", padding: "8px 12px" }} onClick={() => choose(o.choice)}>
-            <div style={{ fontWeight: "bold" }}>{o.label}</div>
+          <DialogButton key={o.label} style={BUTTON} onClick={() => choose(o.choice)}>
+            <div style={{ fontWeight: "bold", whiteSpace: "normal" }}>{o.label}</div>
             <div style={{ fontSize: "0.8em", opacity: 0.8, whiteSpace: "normal" }}>{o.detail}</div>
           </DialogButton>
         ))}
