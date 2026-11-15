@@ -2,6 +2,7 @@
   "name": "memcard-decky",
   "version": "0.1.0",
   "description": "Memcard for Steam Deck Game Mode: two-way game save sync with your own cloud storage",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "rollup -c",

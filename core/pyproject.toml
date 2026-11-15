@@ -7,6 +7,7 @@ name = "memcard"
 version = "0.1.0"
 description = "Two-way game save sync backed by your own cloud storage"
 requires-python = ">=3.11"
+license = "MIT"
 # tomlkit is only imported when Memcard writes config.toml, so the hot paths
 # (wrap, sync, status) stay stdlib-only.
 dependencies = ["tomlkit>=0.12"]
