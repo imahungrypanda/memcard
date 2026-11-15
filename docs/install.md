@@ -57,7 +57,10 @@ You need [Decky Loader](https://decky.xyz) installed.
    Settings → **Developer mode** on.
 2. **Install the plugin:** Decky ⚙ → **Developer** → **Install plugin from URL** →
    `https://github.com/imahungrypanda/memcard/releases/latest/download/memcard-decky.zip`.
-   To update later, install from the same URL again; settings and saves are kept.
+   After that, Memcard checks for updates itself: you get an "update available" toast, or an
+   **Update to …** button under **Updates** in its panel, and Decky asks you to confirm.
+   If an update ever fails, Memcard can disappear from the list (Decky removes the old version
+   first). Install from the URL above again; your settings and saves are untouched.
    (A local build works too: **Install plugin from ZIP file** → `memcard-decky.zip`.)
 3. **Open Memcard** in the Quick Access menu and press **Set up Memcard**:
    - **Name this machine**, e.g. "Steam Deck" or "Steam Machine".
@@ -371,6 +374,10 @@ cloud, with EmuDeck-shaped symlinks. These parts need your hardware:
       game starts afterwards.
 - [ ] After quitting, a "Saves synced" toast appears, and `memcard log` shows `postexit`.
       (If no toast appears, Steam may report appid 0 for shortcuts; tell me.)
+- [ ] Updates: with an older version installed, the panel shows **Update to …**; pressing it
+      brings up Decky's install prompt, and after confirming, Decky's plugin list shows the new version.
+- [ ] **Check for updates** in the panel answers ("Up to date (0.1.x)"), not "Failed to fetch".
+- [ ] The **Update** button is greyed out while a game runs or its saves are syncing.
 - [ ] Toast titles name the game ("Memcard · <game>"), for ROM shortcuts too.
 - [ ] An unmapped game and a regular Steam game launch exactly as before, with no delay.
 - [ ] Pressing Play twice quickly gives a "Still syncing saves…" toast and one launch, not two.

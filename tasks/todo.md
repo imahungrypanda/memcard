@@ -56,7 +56,7 @@ launch options, and `%command%` expansion for shortcuts is unverified. `wrap` st
 
 ## Next
 - [x] MIT license, public repo, release on every green main (`release.yml`, install from URL)
-- [ ] Custom Decky store so updates show up in Decky
+- [x] Update notices: plugin checks GitHub releases and installs through Decky (not a custom store; that would replace the official one)
 - [ ] Show error `detail` in the panel, not just the summary
 - [ ] `memcard history`: list/restore earlier cloud versions of a group
 

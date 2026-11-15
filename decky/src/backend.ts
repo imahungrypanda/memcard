@@ -5,15 +5,16 @@ const memcardCall = callable<[args: string[], stdin: string | null, runId: strin
 const getSettingsCall = callable<[], Settings>("get_settings");
 const setSettingCall = callable<[key: keyof Settings, value: boolean], Settings>("set_setting");
 export const readTokenFile = callable<[path: string], string>("read_token_file");
-export const environment = callable<[], { memcard_bundled: boolean; configured: boolean }>("environment");
+export const environment = callable<[], { memcard_bundled: boolean; configured: boolean; version: string | null }>("environment");
 
 export interface Settings {
   auto_sync: boolean;
   notify: boolean;
+  check_updates: boolean;
 }
 
 // Cached so the launch hook can decide synchronously whether to intercept.
-let settings: Settings = { auto_sync: true, notify: true };
+let settings: Settings = { auto_sync: true, notify: true, check_updates: true };
 
 export async function loadSettings(): Promise<Settings> {
   settings = await getSettingsCall();

@@ -74,4 +74,5 @@ class Plugin:
         return {
             "memcard_bundled": self.runner.memcard.is_file(),
             "configured": config.is_file(),
+            "version": getattr(decky, "DECKY_PLUGIN_VERSION", None),  # package.json, stamped by release.yml
         }
