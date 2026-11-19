@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 # The plugin may only ask for these subcommands; everything else is refused.
-ALLOWED = {"groups", "status", "sync", "setup", "remote", "detect", "trash", "log", "init", "export"}
+ALLOWED = {"groups", "status", "sync", "setup", "remote", "detect", "trash", "log", "init", "export", "history"}
 LEAKY_ENV = ("LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP", "_MEIPASS2", "_PYI_ARCHIVE_FILE")
 LINE_LIMIT = 16 * 1024 * 1024  # a status result with many files can be one long JSON line
 

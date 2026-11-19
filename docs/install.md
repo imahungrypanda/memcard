@@ -313,7 +313,8 @@ Nothing is overwritten or deleted without a copy.
 - **Cloud versions:** every sync that uploads something makes a new version of the
   group in the cloud. `memcard gc` prunes them to `history_versions` per group (20 in new
   configs; older configs say 5).
-  List them, and put one game's save back on every machine:
+  On the Deck, open the Memcard panel and press **Versions** next to a save group. In a
+  terminal, list them and put one game's save back on every machine:
 
   ```bash
   memcard history list retroarch                        # newest first, with what each changed
@@ -403,6 +404,20 @@ cloud, with EmuDeck-shaped symlinks. These parts need your hardware:
 - [ ] While a game runs, the panel's Sync now is greyed out with a note.
 - [ ] Reload the plugin mid-game (Decky ⚙ → reload, or reinstall the zip), then: Resume
       doesn't sync, and quitting still shows "Saves synced".
+- [ ] **Cloud versions:** under Save groups, press **Versions** on RetroArch. The list loads, newest first,
+      with dates, machine names ("this machine" for this one) and what changed. The **Show versions that
+      changed** dropdown and the save toggles work with the controller.
+- [ ] Restore one RetroArch save from an older version: the confirm screen says what happens, a toast
+      appears, the save on this machine is the old one, and the other machine gets it on its next sync.
+      `memcard trash list` shows the replaced copy.
+- [ ] While a game runs, Versions still opens, but **Restore** is greyed out with "You can restore after you quit the game".
+- [ ] Each Save groups row fits the panel: name and description on the left, a **Versions** button on the right, nothing cut off.
+- [ ] In Cloud versions, **B** goes back one screen (confirm → version → list → closed), never straight out.
+- [ ] Press **B** on the "Restoring…" screen: the restore still finishes and its toast appears, and opening Versions
+      again meanwhile shows Restore greyed out until it's done.
+- [ ] For Dolphin (restored whole), a long file list on the version screen scrolls with the D-pad.
+- [ ] Change a save on both machines, then (without syncing this machine in between) restore that group from Versions:
+      the conflict prompt appears on top of Cloud versions, and after choosing, the restore goes ahead.
 - [ ] Find EmuDeck saves → Add maps your shortcuts. Check what would sync and Sync now
       show sensible results.
 
