@@ -265,7 +265,7 @@ log line.
 > **Steam ROM Manager:** re-running SRM can rewrite launch options. If your
 > EmuDeck shortcuts come from SRM, either re-add the prefix after each SRM run, or set
 > the parser's *Executable modifier* to `/home/deck/.local/bin/memcard wrap -- "${exePath}"`.
-> I haven't been able to test the SRM route; see the checklist below.
+> I haven't been able to test the SRM route; see the test run in §8.
 
 ### Optional: periodic background sync
 
@@ -374,9 +374,12 @@ Do it in order: each part sets up what the next one needs. Use one emulator you 
 (RetroArch below) and keep a game handy that saves quickly. **Back up your saves first
 (§0).**
 
+On the Deck the plugin carries its own copy of the CLI. Where a step says `memcard …`,
+run it in Desktop Mode's terminal as `python3 ~/homebrew/plugins/Memcard/bin/memcard …`.
+
 **When a box fails,** note its number and keep going if you can. On the Deck, press
 **Show details** under the error if it has one. Then send me the numbers that failed, with
-`memcard log -n 100` from each machine (or **Show log** in the panel), and I'll fix them.
+`memcard log -n 100` from each machine, and I'll fix them.
 
 ### A. Both machines
 
@@ -384,33 +387,44 @@ Do it in order: each part sets up what the next one needs. Use one emulator you 
 
 ### B. Deck: install and connect
 
-- [ ] B1. Install the **second-newest** release, so B2 and D9 can test updating: Decky ⚙ →
+- [ ] B1. Install the **second-newest** release, so B7, D5 and D9 can test updating. On the
+      [releases page](https://github.com/imahungrypanda/memcard/releases), the two newest
+      should differ only in docs; if a code change landed in between, first run
+      **Actions → release → Run workflow**, which publishes main again. Then: Decky ⚙ →
       Developer → Install plugin from URL →
       `https://github.com/imahungrypanda/memcard/releases/download/v0.1.N/memcard-decky.zip`,
-      where `0.1.N` is the second entry on the [releases page](https://github.com/imahungrypanda/memcard/releases).
-      The plugin installs and the Memcard panel opens.
-- [ ] B2. **Check for updates** in the panel offers **Update to …** (the newest), not "Failed to
-      fetch". Don't press it yet.
+      where `0.1.N` is the second entry. The plugin installs and the Memcard panel opens.
+- [ ] B2. About a minute later, a "Memcard update available" toast offers the newest version.
+      **Don't select it**; D9 installs it.
 - [ ] B3. **Set up Memcard** in Game Mode: the Steam keyboard comes up in text fields, password
       fields are hidden, and **Install rclone** works if it asks.
-- [ ] B4. Enter your Nextcloud **login** password instead of the app password on purpose. You get the
-      "Credentials rejected… app password" message, and **Show details** under it opens rclone's
-      raw output. **B** closes it.
-- [ ] B5. A URL without `/remote.php/dav/files/<user>/` is caught with a message saying so.
+- [ ] B4. Enter the URL without `/remote.php/dav/files/<user>/` on purpose. It's caught with a
+      message saying what the URL should look like. Fix it with **Edit the settings**.
+- [ ] B5. Enter a wrong password on purpose (your login password works for this only if your account
+      uses two-factor login; otherwise type anything wrong). You get "Credentials rejected…" with
+      **Show details** under it, which opens rclone's raw output on top of setup. **B** returns
+      to setup, not out of it.
 - [ ] B6. With the app password, the round trip passes and setup says **Connected**.
-- [ ] B7. Turn Wi-Fi off and press **Check what would sync**. The error appears in the panel with
-      **Show details** under it, which opens rclone's raw output. Turn Wi-Fi back on.
-- [ ] B8. **Show log** opens the log, and the D-pad moves down it line by line to the end.
+- [ ] B7. The panel's **Updates** section shows **Update to …** with the newest version (if it says
+      **Check for updates**, press it: it offers the update, not "Failed to fetch"). Don't press
+      Update yet.
+- [ ] B8. **Show log** opens the log, the D-pad moves down it line by line to the end, and **B**
+      closes it.
 
 ### C. Deck: find saves, first sync
 
-- [ ] C1. **Find EmuDeck saves** lists the emulators you use from `/run/media/deck/FATTY/Emulation`.
+- [ ] C1. In Desktop Mode, save the output of `ls -l /run/media/deck/FATTY/Emulation/saves/*/`
+      to a file. E5 compares against it.
+- [ ] C2. **Find EmuDeck saves** lists the emulators you use from `/run/media/deck/FATTY/Emulation`.
       Press **Add**: each Save groups row says how many games are mapped.
-- [ ] C2. **Check what would sync** shows sensible counts (everything to upload on the first machine).
-- [ ] C3. **Sync now** ends with a toast like "12 save files uploaded". Check what would sync then
+- [ ] C3. **Check what would sync** shows sensible counts (everything to upload on the first machine).
+- [ ] C4. **Sync now** ends with a toast like "12 save files uploaded". Check what would sync then
       says up to date.
-- [ ] C4. Each Save groups row fits the panel: name and description on the left, a **Versions**
+- [ ] C5. Each Save groups row fits the panel: name and description on the left, a **Versions**
       button on the right, nothing cut off.
+- [ ] C6. Turn Wi-Fi off and press **Check what would sync**. The error appears in the panel with
+      **Show details** under it, which opens rclone's raw output, and **B** closes it. Turn Wi-Fi
+      back on.
 
 ### D. Deck: playing a game
 
@@ -420,35 +434,39 @@ Do it in order: each part sets up what the next one needs. Use one emulator you 
 - [ ] D3. Toast titles name the game ("Memcard · <game>"), for ROM shortcuts too.
 - [ ] D4. No noticeable slowdown starting or playing the game.
 - [ ] D5. While it runs: the panel's **Sync now** is greyed out with a note, and **Update to …**
-      is greyed out with "Available after you quit…".
+      is greyed out with "Available after you quit the game and its saves finish syncing."
 - [ ] D6. Going back to the library and resuming the running game doesn't sync or cancel anything.
-- [ ] D7. Save in-game and quit. A "Saves synced" toast appears, `memcard log` shows `postexit`,
-      and **Check what would sync** says up to date (the push included that save). If no toast
-      appears, Steam may report appid 0 for shortcuts; tell me.
-- [ ] D8. Pressing **Play** twice quickly gives a "Still syncing saves…" toast and one launch, not two.
-- [ ] D9. Now press **Update to …**: Decky's install prompt comes up, and after confirming, Decky's
-      plugin list shows the new version. **Check for updates** then says "Up to date (0.1.x)".
-- [ ] D10. Start the game, reload the plugin mid-game (Decky ⚙ → reload, or reinstall from the
-      URL), then: resuming doesn't sync, and quitting still shows "Saves synced".
+- [ ] D7. Save in-game and quit. Until the "Saves synced" toast appears, **Update to …** stays
+      greyed out. After it, **Show log** has a `postexit` line, and **Check what would sync**
+      says up to date (the push included that save). If no toast appears, Steam may report
+      appid 0 for shortcuts; tell me.
+- [ ] D8. Pressing **Play** twice quickly gives a "Still syncing saves…" toast and one launch, not
+      two. Quit the game and wait for its "Saves synced" toast.
+- [ ] D9. Press **Update to …**: Decky's install prompt comes up, and after confirming, Decky's
+      plugin list shows the new version. The panel's footer shows it too, and **Check for
+      updates** says "Up to date. Checked …".
+- [ ] D10. Start the game, then reload the plugin mid-game (Decky ⚙ → Plugins → Memcard's **⋯**
+      → Reload). Resuming the game doesn't sync, and quitting still shows "Saves synced".
 
 ### E. Bazzite: the second machine
 
 - [ ] E1. Set it up with the terminal route (§3). `memcard detect` finds your emulators and maps
       your Steam shortcuts to them.
 - [ ] E2. The first sync (§3.1) downloads the Deck's saves, and the game on Bazzite sees them.
-- [ ] E3. The launch option (§4) works for an SRM shortcut: the game starts, and `memcard log`
-      shows `prelaunch` before and `postexit` after.
+- [ ] E3. The launch option (§4) works for an SRM shortcut: the game starts with no noticeable
+      delay, and `memcard log` shows `prelaunch` before and `postexit` after.
 - [ ] E4. Post-exit waits for the emulator: save in-game, quit, and the push includes that save.
 - [ ] E5. Back on the Deck, press **Play** on that game: it downloads Bazzite's save, and the pull
-      writes **through** EmuDeck's symlinks. This should still print `->` arrows, not plain folders:
-      `ls -l /run/media/deck/FATTY/Emulation/saves/*/`
+      wrote **through** EmuDeck's symlinks. `ls -l /run/media/deck/FATTY/Emulation/saves/*/`
+      still matches C1: every `->` arrow is still there, not replaced by a plain folder.
 
 ### F. A real conflict
 
-- [ ] F1. Turn the Deck's Wi-Fi off and play a game there (it still launches, with a toast saying
-      its saves didn't sync). Play the same game on Bazzite and quit. Turn Wi-Fi back on, then press
-      **Play** on the Deck: the conflict pop-up appears, each button does what it says, and the
-      game starts afterwards.
+- [ ] F1. On the Deck, turn Wi-Fi off, play a game, **save in-game** and quit (it still launches,
+      with a toast saying its saves didn't sync). On Bazzite, play the same game, **save
+      in-game** and quit. Turn the Deck's Wi-Fi back on and press **Play** there: the conflict
+      pop-up appears, the choice you pick does what it says, and the game starts afterwards.
+      (Repeat with a different choice to check the others.)
 
 ### G. Deck: Cloud versions
 
@@ -463,7 +481,9 @@ Do it in order: each part sets up what the next one needs. Use one emulator you 
       and opening Versions again meanwhile shows Restore greyed out until it's done.
 - [ ] G5. While a game runs, Versions still opens, but **Restore** is greyed out with "You can
       restore after you quit the game".
-- [ ] G6. For Dolphin (restored whole), a long file list on the version screen scrolls with the D-pad.
-- [ ] G7. Change a save on both machines, then (without syncing the Deck in between) restore that
-      group from Versions: the conflict prompt appears on top of Cloud versions, and after
-      choosing, the restore goes ahead.
+- [ ] G6. If you use Dolphin (restored whole): a long file list on the version screen scrolls with
+      the D-pad.
+- [ ] G7. A restore that meets a conflict. On the Deck, turn off **Sync around games**, then play a
+      game, save in-game and quit. On Bazzite, play the same game, save in-game and quit. Back on the
+      Deck, turn **Sync around games** on again and restore that group from Versions: the conflict
+      prompt appears on top of Cloud versions, and after choosing, the restore goes ahead.

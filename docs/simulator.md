@@ -208,7 +208,7 @@ Each one maps to a bug we've had or a line in `install.md` §8:
 
 ## 7. What it won't tell us
 
-These stay on the hardware checklist:
+These stay on the hardware test run (`install.md` §8):
 
 - **Real `@decky/ui`:** how it renders, panel width and wrapping, scrolling.
 - **The controller:** focus order, the D-pad, **B** going back one screen, the Steam keyboard in
