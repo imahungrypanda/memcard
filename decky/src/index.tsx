@@ -237,7 +237,7 @@ function Content() {
                 showHistory(
                   g,
                   groups?.machine ?? { id: "", name: "this machine" },
-                  () => blockedReason(controller.isRunning() || controller.isBusy(), g.id in (cachedGroups()?.pending ?? {}), g.label || g.id),
+                  () => blockedReason(controller.isRunning(), controller.isBusy() || !!busy, g.id in (cachedGroups()?.pending ?? {}), g.label || g.id),
                   () => refreshGroups(),
                 )
               }

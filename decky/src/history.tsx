@@ -1,16 +1,20 @@
 import { toaster } from "@decky/api";
 import { DialogButton, Dropdown, Focusable, ModalRoot, showModal, Spinner, ToggleField } from "@decky/ui";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { errorText, memcard } from "./backend";
 import { askResolutions } from "./conflicts";
 import {
   changeSummary,
   confirmText,
+  downloadPendingToast,
   initialSelection,
+  listArgs,
+  namer,
   restoreArgs,
+  restoredFromText,
   restoredToast,
-  saveName,
   thenNow,
+  unitSides,
   versionTitle,
   type Me,
 } from "./historyText";
@@ -55,11 +59,15 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
   const [picked, setPicked] = useState<string[]>([]);
   const [error, setError] = useState<MemcardError | null>(null);
   const [loading, setLoading] = useState(true);
+  const request = useRef(0); // only the newest list request may update the screen
+  const running = useRef(false); // one restore at a time, however fast Restore is pressed
 
   const load = async (unit: string | null) => {
+    const mine = ++request.current;
     setLoading(true);
     setError(null);
-    const r = await memcard<HistoryData>(["history", "list", group.id, ...(unit ? ["--unit", unit] : [])]);
+    const r = await memcard<HistoryData>(listArgs(group.id, unit));
+    if (mine !== request.current) return;
     setLoading(false);
     if (r.error || !r.result) return setError(r.error ?? { code: "error", message: "Couldn't read the cloud versions." });
     setData(r.result);
@@ -73,6 +81,12 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
     load(null);
   }, []);
 
+  // Names that never look identical (Zelda.srm beside Zelda.rtc), across everything on screen.
+  const name = useMemo(
+    () => namer([...saves, ...(data?.versions ?? []).flatMap((v) => [...v.differs.map((d) => d.unit), ...(v.changes ?? []).map((c) => c.path)])], label),
+    [saves, data],
+  );
+
   const open = (v: HistoryVersion) => {
     setVersion(v);
     setPicked(initialSelection(v, filter));
@@ -80,32 +94,36 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
     setView("detail");
   };
 
-  const restore = async (resolve: string[] = []) => {
-    if (!data || !version) return;
+  const restore = async (resolve: string[] = []): Promise<void> => {
+    if (!data || !version || (running.current && !resolve.length)) return;
+    running.current = true;
     setView("working");
     setError(null);
     const units = data.unit === "group" ? [] : picked;
     const r = await memcard<RestoreData>(restoreArgs(group.id, version.generation, data.unit, units, resolve));
     const out = r.result;
-    if (!out || (!out.restored && r.error)) {
-      setError(r.error ?? { code: "error", message: "The restore didn't finish." });
-      return setView("detail");
-    }
-    if (!out.restored) {
-      const before = out.results[0];
+    onChanged(); // the first sync may have pushed, pulled or recorded a conflict, whatever happened next
+    if (!out?.restored) {
+      const before = out?.results[0];
       if (before?.conflicts.length && !resolve.length) {
-        const specs = await askResolutions(out.results, me);
+        const specs = await askResolutions(out!.results, me);
         if (specs.length) return restore(specs);
       }
-      setError(before?.error ?? { code: "conflicts", message: `Nothing was restored: ${label} has a conflict waiting.` });
-      return setView("detail");
+      running.current = false;
+      setError(r.error ?? before?.error ?? { code: "conflicts", message: `Nothing was restored: ${label} has a conflict waiting.` });
+      setView("detail");
+      return;
     }
-    toaster.toast({ title: `Memcard · ${label}`, body: restoredToast(label, data.unit, units, version), duration: 6000 });
+    running.current = false;
     const after = out.results[out.results.length - 1];
-    if (after?.conflicts.length) {
-      toaster.toast({ title: `Memcard · ${label}`, body: "A save changed here during the restore. It's listed under Resolve conflicts.", duration: 6000 });
+    if (after && (after.status === "error" || after.status === "skipped")) {
+      toaster.toast({ title: `Memcard · ${label}`, body: downloadPendingToast(label, errorText(after.error) || "it stopped"), duration: 8000 });
+    } else {
+      toaster.toast({ title: `Memcard · ${label}`, body: restoredToast(label, data.unit, units, version, undefined, name), duration: 6000 });
+      if (after?.conflicts.length) {
+        toaster.toast({ title: `Memcard · ${label}`, body: "A save changed here during the restore. It's listed under Resolve conflicts.", duration: 6000 });
+      }
     }
-    onChanged();
     setView("list");
     setFilter(null);
     load(null);
@@ -129,7 +147,7 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
             <Dropdown
               menuLabel="Show versions that changed"
               strDefaultLabel="Any save"
-              rgOptions={[{ data: null, label: "Any save" }, ...saves.map((s) => ({ data: s, label: saveName(s, label) }))]}
+              rgOptions={[{ data: null, label: "Any save" }, ...saves.map((s) => ({ data: s, label: name(s) }))]}
               selectedOption={filter}
               onChange={(o) => {
                 setFilter(o.data);
@@ -153,13 +171,13 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
                   {v.restored_from !== null && !v.current && <span style={{ ...PILL, background: "rgba(58,160,255,.18)", color: "#3aa0ff" }}>RESTORE</span>}
                 </div>
                 <div style={{ fontSize: "0.8em", opacity: 0.8 }}>
-                  {v.restored_from !== null ? `Restored from version ${v.restored_from}. ` : ""}
-                  {changeSummary(v, data.unit, label)}
+                  {v.restored_from !== null ? `${restoredFromText(v, data)} ` : ""}
+                  {changeSummary(v, data.unit, name)}
                 </div>
               </DialogButton>
             ))}
         </Focusable>
-        {data?.more && <div style={{ fontSize: "0.8em", opacity: 0.6, marginTop: 6 }}>Older versions are in the cloud too; `memcard history list` shows them.</div>}
+        {data?.more && <div style={{ fontSize: "0.8em", opacity: 0.6, marginTop: 6 }}>Older versions are in the cloud too.</div>}
         <DialogButton style={{ marginTop: 10 }} onClick={closeModal}>
           Close
         </DialogButton>
@@ -171,7 +189,7 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
   const restorable = version.differs.filter((d) => d.restorable);
   const missing = version.differs.filter((d) => !d.restorable);
   const units = data.unit === "group" ? restorable.map((d) => d.unit) : picked;
-  const confirm = confirmText(version, data, label, units, me);
+  const confirm = confirmText(version, data, label, units, me, undefined, name);
   const canRestore = !version.current && restorable.length > 0;
 
   if (view === "confirm") {
@@ -206,9 +224,12 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
 
   return (
     <ModalRoot onCancel={() => setView("list")} bAllowFullSize>
-      {header(versionTitle(version, data, me), changeSummary(version, data.unit, label))}
+      {header(versionTitle(version, data, me), changeSummary(version, data.unit, name))}
       {version.current && <div style={{ opacity: 0.75 }}>This is the current version. Pick an older one to restore from.</div>}
-      {!version.current && !restorable.length && <div style={{ opacity: 0.75 }}>Every save in this version matches the current one, so there's nothing to restore.</div>}
+      {!version.current && !version.differs.length && <div style={{ opacity: 0.75 }}>Every save in this version matches the current one, so there's nothing to restore.</div>}
+      {!version.current && version.differs.length > 0 && !restorable.length && (
+        <div style={{ opacity: 0.75 }}>Nothing here can be restored: the saves that differ now didn't exist yet in this version.</div>
+      )}
       {canRestore && data.unit === "group" && (
         <div style={{ opacity: 0.75, marginBottom: 6 }}>{label} saves are restored together, so a game is never left half from one version and half from another.</div>
       )}
@@ -218,15 +239,15 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
           data.unit === "group" ? (
             d.files.map((f) => (
               <div key={f.path} style={{ padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,.08)" }}>
-                <div style={{ fontWeight: "bold" }}>{saveName(f.path, label)}</div>
+                <div style={{ fontWeight: "bold" }}>{name(f.path)}</div>
                 <div style={{ fontSize: "0.8em", opacity: 0.75 }}>{thenNow(f.then, f.now, me, data.machines)}</div>
               </div>
             ))
           ) : (
             <ToggleField
               key={d.unit}
-              label={saveName(d.unit, label)}
-              description={thenNow(d.files[0]?.then ?? null, d.files[0]?.now ?? null, me, data.machines)}
+              label={name(d.unit)}
+              description={(({ then, now }) => thenNow(then, now, me, data.machines))(unitSides(d))}
               checked={picked.includes(d.unit)}
               onChange={(on) => setPicked(on ? [...picked, d.unit] : picked.filter((u) => u !== d.unit))}
             />
@@ -234,7 +255,7 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
         )}
         {missing.map((d) => (
           <div key={d.unit} style={{ padding: "6px 0", opacity: 0.5 }}>
-            <div style={{ fontWeight: "bold" }}>{saveName(d.unit, label)}</div>
+            <div style={{ fontWeight: "bold" }}>{name(d.unit)}</div>
             <div style={{ fontSize: "0.8em" }}>Not saved yet in this version, so it can't be restored from it.</div>
           </div>
         ))}

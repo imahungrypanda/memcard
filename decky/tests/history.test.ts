@@ -5,9 +5,13 @@ import {
   changeSummary,
   confirmText,
   initialSelection,
+  listArgs,
+  namer,
+  restoredFromText,
   restoreArgs,
   saveName,
   thenNow,
+  unitSides,
   versionTitle,
   when,
   who,
@@ -64,12 +68,13 @@ test("save names drop the extension; a whole group uses the group's name", () =>
 });
 
 test("change summaries", () => {
-  assert.equal(changeSummary(version(), "file", "RetroArch"), "Legend of Zelda, The - A Link to the Past (USA) changed");
-  assert.match(changeSummary(version({ changes: null }), "file", "RetroArch"), /cleaned up/);
+  const ra = (u: string) => saveName(u, "RetroArch");
+  assert.equal(changeSummary(version(), "file", ra), "Legend of Zelda, The - A Link to the Past (USA) changed");
+  assert.match(changeSummary(version({ changes: null }), "file", ra), /cleaned up/);
   const many = version({
     changes: ["a", "b", "c", "d"].map((n) => ({ path: `${n}.gci`, unit: "", change: "added", size: 1 })),
   });
-  assert.equal(changeSummary(many, "group", "Dolphin"), "4 files changed: a, b, c and 1 more");
+  assert.equal(changeSummary(many, "group", (u) => saveName(u, "Dolphin")), "4 files changed: a, b, c and 1 more");
 });
 
 test("then and now, from this machine's point of view", () => {
@@ -79,10 +84,41 @@ test("then and now, from this machine's point of view", () => {
   assert.match(thenNow(v.differs[0].files[0].then, null, me, machines, now), /Now: deleted$/);
 });
 
-test("toggles start on only for what that version changed, or the filtered save", () => {
+test("toggles start on for the one save that version changed, or the filtered save, never several", () => {
   assert.deepEqual(initialSelection(version(), null), [ZELDA]);
   assert.deepEqual(initialSelection(version(), METROID), [METROID]);
   assert.deepEqual(initialSelection(version(), "Chrono Trigger (USA).srm"), [], "not restorable: didn't exist then");
+  const firstUpload = version({ changes: [ZELDA, METROID].map((u) => ({ path: u, unit: u, change: "added", size: 1 })) });
+  assert.deepEqual(initialSelection(firstUpload, null), [], "a version that changed several saves starts with none on");
+});
+
+test("saves with the same short name stay distinguishable", () => {
+  const name = namer(["Zelda.srm", "Zelda.rtc", "Metroid.srm", "gba/X.srm", "gb/X.srm"], "RetroArch");
+  assert.equal(name("Metroid.srm"), "Metroid");
+  assert.equal(name("Zelda.srm"), "Zelda.srm");
+  assert.equal(name("Zelda.rtc"), "Zelda.rtc");
+  assert.equal(name("gba/X.srm"), "gba/X.srm");
+  assert.equal(name(""), "RetroArch");
+});
+
+test("a folder's then/now is its most recently written file", () => {
+  const d = {
+    unit: "ULUS10041",
+    restorable: true,
+    files: [
+      { path: "ULUS10041/DATA.BIN", then: side(at(2026, 10, 15, 10, 0), "m-deck"), now: side(at(2026, 10, 18, 9, 0), "m-self") },
+      { path: "ULUS10041/ICON0.PNG", then: null, now: side(at(2026, 10, 17, 9, 0), "m-self") },
+    ],
+  } as never;
+  const { then, now: current } = unitSides(d);
+  assert.equal(then!.written_at, at(2026, 10, 15, 10, 0));
+  assert.equal(current!.written_at, at(2026, 10, 18, 9, 0));
+});
+
+test("a restore names the version it came from by date", () => {
+  const d = { ...(data() as object), versions: [version()] } as never;
+  assert.equal(restoredFromText(version({ generation: 49, restored_from: 45 }), d, now), "Restored from Yesterday, 21:40.");
+  assert.equal(restoredFromText(version({ generation: 49, restored_from: 3 }), d, now), "Restored from an earlier version.");
 });
 
 test("confirm spells out the result, the trash and the undo", () => {
@@ -110,18 +146,23 @@ test("memory cards and removed files get their own warning", () => {
   });
   const c = confirmText(whole, data("group"), "Dolphin (GameCube)", [], me, now);
   assert.equal(c.title, "Restore Dolphin (GameCube) saves?");
-  assert.match(c.notes.join(" "), /removed here: 01-GPVE-Pikmin/);
+  assert.match(c.notes.join(" "), /removed from the cloud and from every machine, including any on this machine that haven't synced yet: 01-GPVE-Pikmin/);
+  assert.equal(confirmText(version(), data(), "RetroArch", [ZELDA], me, now).notes.length, 0, "file units never remove other files");
 });
 
 test("restore names every save explicitly, and a whole group needs none", () => {
   assert.deepEqual(restoreArgs("retroarch", 45, "file", [ZELDA, METROID]),
-    ["history", "restore", "retroarch", "45", "--unit", ZELDA, "--unit", METROID]);
+    ["history", "restore", "retroarch", "45", `--unit=${ZELDA}`, `--unit=${METROID}`]);
+  assert.deepEqual(restoreArgs("ra", 2, "file", ["-odd.srm"]).slice(-1), ["--unit=-odd.srm"], "never read as an option");
+  assert.deepEqual(listArgs("ra", "-odd.srm"), ["history", "list", "ra", "--unit=-odd.srm"]);
+  assert.deepEqual(listArgs("ra", null), ["history", "list", "ra"]);
   assert.deepEqual(restoreArgs("dolphin-gc", 9, "group", ["ignored"], ["--resolve", "dolphin-gc=local"]),
     ["history", "restore", "dolphin-gc", "9", "--resolve", "dolphin-gc=local"]);
 });
 
 test("restore is blocked during a game or a pending conflict, with the reason", () => {
-  assert.equal(blockedReason(true, false, "RetroArch"), "You can restore after you quit the game.");
-  assert.match(blockedReason(false, true, "RetroArch")!, /RetroArch has a conflict waiting/);
-  assert.equal(blockedReason(false, false, "RetroArch"), null);
+  assert.equal(blockedReason(true, false, false, "RetroArch"), "You can restore after you quit the game.");
+  assert.equal(blockedReason(false, true, false, "RetroArch"), "You can restore when the current sync finishes.");
+  assert.match(blockedReason(false, false, true, "RetroArch")!, /RetroArch has a conflict waiting/);
+  assert.equal(blockedReason(false, false, false, "RetroArch"), null);
 });
