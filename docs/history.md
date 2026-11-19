@@ -224,16 +224,21 @@ next to a `restore` subcommand, and `restore` is a valid group id. For `group`-u
 Two halves:
 
 - **gc backs off.** gc lists every group's `HEAD.json` (size and modtime, one
-  `lsjson --max-depth 2` call) before reading any manifest, and again right before deleting. If any
-  changed or appeared, it deletes nothing and asks to be run again. This covers gc's own long window
-  (reading every group, then listing every object).
+  `lsjson --max-depth 2` call) before reading any manifest. It lists them again before each batch of
+  deletes (200 objects per batch). If any HEAD changed or appeared, it stops deleting and asks to be
+  run again. This covers gc's own long window (reading every group, then listing every object), and
+  keeps the window left to one batch's delete call.
 - **A commit checks its objects.** After any commit, push or restore, `RemoteStore.missing(shas)`
   lists the objects the new HEAD references that its parent didn't. That's one
   `lsf -R --files-from` call, which only lists those prefix folders. Missing objects are uploaded
   again: from staging for a push, from the object cache for a restore.
   - It runs with no deadline or cancel. Past the commit point, a later sync sees `L == R` and never
     re-uploads.
-  - This covers the few calls between gc's second listing and its delete.
+  - This covers a commit that lands between gc's last HEAD listing and its delete.
+- **What's left:** a commit landing *during* one batch's delete call, after its own check has run.
+  Also a HEAD rewritten with the same size within the same second (WebDAV modtimes are whole
+  seconds), which the listing can't tell apart. Closing these would need a lock on the remote, which
+  rclone remotes don't offer.
 - **Fresh mtimes.** Uploads are fresh copies, never hard links. rclone carries the source mtime to
   backends that store one, and gc's grace period reads it as the upload time. A re-upload from the
   cache would otherwise look old.
