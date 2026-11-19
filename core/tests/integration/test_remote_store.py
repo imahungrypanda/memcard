@@ -122,3 +122,32 @@ def test_probe_leftovers_dont_block_claiming_an_empty_folder(store):
     (store.dir / ".memcard-probe-abc123").write_text("x")
     store.commit(manifest(1, None))
     assert store.head("g").generation == 1
+
+
+def test_missing_names_only_the_absent_objects(store, tmp_path):
+    shas = []
+    for name in ("a", "b"):
+        p = tmp_path / name
+        p.write_bytes(name.encode())
+        shas.append(sha256(p))
+    absent = "ff" + "0" * 62  # its prefix folder doesn't exist either
+    assert store.missing({shas[0], absent}) == {shas[0], absent}  # no objects/ folder yet
+    store.upload({shas[0]: tmp_path / "a"})
+    assert store.missing({shas[0], shas[1], absent}) == {shas[1], absent}
+    assert store.missing(set()) == set()
+
+
+def test_uploads_are_stamped_with_the_upload_time(store, tmp_path):
+    """gc's grace period reads object mtimes as upload times. A source with an
+    old mtime (a re-upload from the object cache, say) must not look collectable."""
+    import os
+    import time
+
+    p = tmp_path / "old.srm"
+    p.write_bytes(b"old save")
+    three_days_ago = time.time() - 3 * 86400
+    os.utime(p, (three_days_ago, three_days_ago))
+    store.upload({sha256(p): p})
+    store.commit(manifest(1, None))  # references nothing: the object is unreferenced
+    assert store.gc(keep=2)["objects_deleted"] == 0
+    assert os.stat(p).st_mtime == three_days_ago, "upload must not touch its source"

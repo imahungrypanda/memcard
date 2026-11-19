@@ -402,3 +402,31 @@ def test_background_sync_stops_at_a_safe_point_when_a_game_starts(world):
     with pytest.raises(Cancelled):
         deck.engine().sync([deck.group, other], engine_mod.no_decisions, abort_if=game_started_after_first_group)
     assert deck.engine().store.head("other") is None
+
+
+def test_object_lost_to_gc_before_commit_is_uploaded_again(world, monkeypatch):
+    """#2: a push reuses an old object that's already on the remote, so upload()
+    skips it. If another machine's gc deletes it before our commit, HEAD would
+    point at nothing and every pull would fail."""
+    from memcard.store.remote import object_rel
+
+    deck, pc = world("Deck"), world("PC")
+    deck.write("s.srm", b"v1")
+    deck.sync()
+    deck.write("s.srm", b"v2")
+    deck.sync()
+    deck.write("s.srm", b"v1")  # back to v1, whose object is still on the remote
+    v1 = engine_mod.scan.sha256(deck.saves / "s.srm")
+
+    real_commit = RemoteStore.commit
+
+    def gc_strikes_first(self, manifest):
+        self.rclone("deletefile", self._p("objects", object_rel(v1)))
+        return real_commit(self, manifest)
+
+    monkeypatch.setattr(RemoteStore, "commit", gc_strikes_first)
+    assert deck.sync().pushed == ["s.srm"]
+    monkeypatch.setattr(RemoteStore, "commit", real_commit)
+    assert deck.engine().store.missing({v1}) == set()
+    r = pc.sync()
+    assert r.status == "ok" and pc.read("s.srm") == b"v1"

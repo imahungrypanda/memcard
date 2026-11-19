@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shutil
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -164,16 +163,28 @@ class RemoteStore:
             for sha, src in files.items():
                 dest = outbox / object_rel(sha)
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    os.link(src, dest)
-                except OSError:
-                    shutil.copyfile(src, dest)
+                # A fresh copy, not a link: rclone carries the file's mtime to
+                # the remote, and gc's grace period reads it as the upload time.
+                # A re-upload from the object cache would otherwise look old.
+                shutil.copyfile(src, dest)
             listing = "\n".join(object_rel(s) for s in sorted(files)) + "\n"
             # Content-addressed, so same name + same size means same bytes; a
             # truncated earlier upload has a different size and is replaced.
             self.rclone("copy", str(outbox), self._p("objects"), "--files-from", "-", "--no-traverse", "--size-only", input=listing)
         finally:
             shutil.rmtree(outbox, ignore_errors=True)
+
+    def missing(self, shas: set[str]) -> set[str]:
+        """Which of these objects aren't on the remote. One rclone call that lists only their prefix folders."""
+        if not shas:
+            return set()
+        listing = "\n".join(object_rel(s) for s in sorted(shas)) + "\n"
+        result = self.rclone.raw("lsf", "-R", "--files-only", "--files-from", "-", self._p("objects"), input=listing)
+        if result.returncode != 0:
+            if Rclone.is_missing(result):
+                return set(shas)  # no objects/ folder at all
+            self.rclone.check(result)
+        return set(shas) - {line.rpartition("/")[2] for line in result.stdout.split()}
 
     def fetch(self, shas: set[str]) -> dict[str, Path]:
         """Make sure each object is in the local cache, verified. Cached ones aren't downloaded again."""
