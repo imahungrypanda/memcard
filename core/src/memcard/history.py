@@ -90,8 +90,12 @@ def compare(version: Files, head: Files, group: Group) -> list[UnitDiff]:
     return [by_unit[k] for k in sorted(by_unit)]
 
 
-def check_request(old: Files, units: list[str] | None, group: Group, generation: int) -> None:
-    """The checks no sync can change: run before the sync that precedes a restore, so a bad request fails fast."""
+def check_request(old: Files, units: list[str] | None, group: Group, generation: int | None = None) -> None:
+    """The checks that depend only on the request and the old version, never on HEAD.
+
+    The engine runs them before the sync that precedes a restore, so a bad request
+    fails before any sync or conflict prompt; ``restore_files`` runs them again.
+    """
     if units and whole(group):
         raise ConfigError(
             f"{group.id} is restored as a whole, so it has no separate saves to pick.",
@@ -100,10 +104,11 @@ def check_request(old: Files, units: list[str] | None, group: Group, generation:
     if not old:
         raise MemcardError(f"That version of {group.id} has no saves in it, so there's nothing to restore.")
     present = _units(old, group)
+    version = "that version" if generation is None else f"version {generation}"
     for u in sorted(set(units or [])):
         if u not in present:
             raise ConfigError(
-                f"{group.id} has no save {u!r} in version {generation}.",
+                f"{group.id} has no save {u!r} in {version}, so there's nothing to restore.",
                 hint="`memcard history list` shows which saves each version has.",
             )
 
@@ -115,25 +120,11 @@ def restore_files(head: Files, old: Files, units: list[str] | None, group: Group
     Restored entries keep their content, size and mtime, and are stamped as
     written by ``machine_id`` at ``now``: that's when the cloud got them back.
     """
-    if units and whole(group):
-        raise ConfigError(
-            f"{group.id} is restored as a whole, so it has no separate saves to pick.",
-            hint="Leave out --unit.",
-        )
-    if not old:
-        raise MemcardError(f"That version of {group.id} has no saves in it, so there's nothing to restore.")
-    differing = compare(old, head, group)
-    present = _units(old, group)
+    check_request(old, units, group)
     if units is None:
-        chosen = {d.unit for d in differing if d.restorable}
+        chosen = {d.unit for d in compare(old, head, group) if d.restorable}
     else:
         chosen = set(units)
-        known = present | {d.unit for d in differing}
-        for u in sorted(chosen):
-            if u not in known:
-                raise ConfigError(f"{group.id} has no save {u!r} in that version or now.", hint="`memcard history list` shows them.")
-            if u not in present:
-                raise ConfigError(f"{u} wasn't saved yet in that version, so there's nothing to restore.")
 
     def restored(e: FileEntry) -> FileEntry:
         return FileEntry(e.sha256, e.size, e.mtime, machine_id or e.written_by, now or e.written_at)
