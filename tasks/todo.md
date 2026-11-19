@@ -63,9 +63,10 @@ launch options, and `%command%` expansion for shortcuts is unverified. `wrap` st
     reaches every machine. Sync first, restore, sync again in one lock. Refused while a game runs or
     the group has a pending conflict. `restored_from` in the manifest; `history_versions` default 20.
   - [x] Step 0: clickable mock of the Decky "Cloud versions" flow (artifact), approved; design in `docs/history.md`
-  - [ ] PR 1: after commit, re-upload objects the new HEAD references but the remote lost (closes #2)
-  - [ ] PR 2: core `history.py` (pure diff/restore_files), `RemoteStore.manifests` (one rclone copy),
-        `Engine.history`/`restore`, `memcard history [restore]` CLI, tests on local + webdav, docs
+  - [ ] PR 1 (#16): gc backs off if any HEAD changed while it ran; after commit, re-upload objects the
+        new HEAD references but the remote lost (closes #2)
+  - [ ] PR 2: core `history.py` (pure diff/compare/restore_files), `RemoteStore.manifests` (one rclone copy),
+        `Engine.history`/`restore`, `memcard history list|restore` CLI, tests on local + webdav, docs
   - [ ] PR 3: decky Cloud versions modal (`historyText.ts` pure + tests, `history.tsx`, allowlist)
 
 ## Phase 3 — memcard-gui

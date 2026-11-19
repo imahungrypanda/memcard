@@ -47,7 +47,7 @@ without copying files by hand, and none of it is reachable in Game Mode. This fe
 2. **Restore picks units, not whole versions.**
    - **`file` and `dir` groups:** you name the saves with `--unit KEY` (repeatable), or pass `--all`
      explicitly. One RetroArch group holds every RetroArch game, so rolling all of them back is never
-     the default.
+     the default. `--all` restores every unit that existed in that version; saves added since are kept.
    - **`group` groups:** always restore whole, and take no `--unit`.
    - **Units that didn't exist then are refused** ("wasn't saved yet then"). Restore is not a back
      door for deleting saves.
@@ -84,8 +84,8 @@ without copying files by hand, and none of it is reachable in Game Mode. This fe
    separate Tools button with a group picker.
 9. **`memcard history list --json` says, per version, which saves differ from the current version**,
    so the detail screen needs no second command (§5.4).
-10. **A restore that would look like "the cloud lost every save" is refused.** That's a version that
-    shares no file paths with the current one. Every machine's mass-delete guard would read it as a
+10. **A restore that would look like "the cloud lost every save" is refused.** That's a restore
+    whose *result* shares no file paths with the current HEAD. Every machine's mass-delete guard would read it as a
     wiped remote and offer to upload the saves again, undoing the restore. `memcard export` remains
     the way out.
 
@@ -196,7 +196,8 @@ next to a `restore` subcommand, and `restore` is a valid group id. For `group`-u
 }
 ```
 
-- Machine ids appear next to names, so a UI can say "this machine" when the id is its own.
+- Machine ids appear next to names, so a UI can say "this machine" when the id is its own. The
+  top-level `machines` map merges the listed manifests' maps, with HEAD's names winning.
 - Ids missing from `machines` are named "another machine".
 
 `memcard history restore … --json` ends with:
@@ -292,7 +293,7 @@ Code layout mirrors the conflict prompt:
   - `diff` and `compare` for each unit kind.
   - `restore_files` restores whole units, including paths this machine doesn't sync, and stamps the
     restorer.
-  - It refuses absent and unknown units, no-op restores, and versions that share no paths with now.
+  - It refuses absent and unknown units, no-op restores, and restores whose result shares no paths with HEAD.
 - **Integration** (`tests/integration/test_cloud_versions.py`, on both the `local` backend and WebDAV):
   - Two machines. A pushes v1 and v2 of units X and Y, then restores X@v1. B syncs and gets X@v1 and Y@v2.
   - The list shows `restored_from`, `differs`, `--unit` filtering, `limit`/`more`, and a pruned parent
