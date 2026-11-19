@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shutil
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -30,6 +29,7 @@ log = logging.getLogger(__name__)
 MARKER = "memcard-remote.json"
 PROBE_PREFIX = ".memcard-probe-"  # setup's round-trip test file; may be left behind if its delete failed
 GC_GRACE = timedelta(days=1)  # don't collect objects a push in flight may be about to commit
+GC_BATCH = 200  # objects per delete call; every HEAD is re-checked before each one
 
 
 def object_rel(sha: str) -> str:
@@ -164,16 +164,28 @@ class RemoteStore:
             for sha, src in files.items():
                 dest = outbox / object_rel(sha)
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    os.link(src, dest)
-                except OSError:
-                    shutil.copyfile(src, dest)
+                # A fresh copy, not a link: rclone carries the file's mtime to
+                # the remote, and gc's grace period reads it as the upload time.
+                # A re-upload from the object cache would otherwise look old.
+                shutil.copyfile(src, dest)
             listing = "\n".join(object_rel(s) for s in sorted(files)) + "\n"
             # Content-addressed, so same name + same size means same bytes; a
             # truncated earlier upload has a different size and is replaced.
             self.rclone("copy", str(outbox), self._p("objects"), "--files-from", "-", "--no-traverse", "--size-only", input=listing)
         finally:
             shutil.rmtree(outbox, ignore_errors=True)
+
+    def missing(self, shas: set[str]) -> set[str]:
+        """Which of these objects aren't on the remote. One rclone call that lists only their prefix folders."""
+        if not shas:
+            return set()
+        listing = "\n".join(object_rel(s) for s in sorted(shas)) + "\n"
+        result = self.rclone.raw("lsf", "-R", "--files-only", "--files-from", "-", self._p("objects"), input=listing)
+        if result.returncode != 0:
+            if Rclone.is_missing(result):
+                return set(shas)  # no objects/ folder at all
+            self.rclone.check(result)
+        return set(shas) - {line.rpartition("/")[2] for line in result.stdout.split()}
 
     def fetch(self, shas: set[str]) -> dict[str, Path]:
         """Make sure each object is in the local cache, verified. Cached ones aren't downloaded again."""
@@ -204,6 +216,7 @@ class RemoteStore:
         would make live objects look like garbage.
         """
         self.ensure_initialized(create=False)
+        heads_before = self._heads()
         groups_ls = self.rclone.raw("lsf", "--dirs-only", self._p("groups"))
         if groups_ls.returncode != 0 and not Rclone.is_missing(groups_ls):
             self.rclone.check(groups_ls)
@@ -237,9 +250,32 @@ class RemoteStore:
             if datetime.fromisoformat(item["ModTime"].replace("Z", "+00:00")) > cutoff:
                 continue
             doomed.append(item["Path"])
-        if doomed:
-            self.rclone("delete", self._p("objects"), "--files-from", "-", input="\n".join(doomed) + "\n")
-        return {"history_pruned": pruned, "objects_deleted": len(doomed)}
+        # A commit that landed after we read its group's HEAD may reference an
+        # object we're about to delete: an old one that its push found already
+        # uploaded (#2). Re-list every HEAD before each batch and stop if any
+        # changed. What's left is one batch's delete call; a commit landing
+        # just before it is caught by that machine's post-commit check.
+        deleted = 0
+        for i in range(0, len(doomed), GC_BATCH):
+            if self._heads() != heads_before:
+                done = f"stopped after deleting {deleted} unused object(s)" if deleted else "deleted nothing"
+                raise RemoteChanged(
+                    f"Another machine synced while gc was running, so it {done}.",
+                    hint="Run `memcard gc` again.",
+                )
+            batch = doomed[i:i + GC_BATCH]
+            self.rclone("delete", self._p("objects"), "--files-from", "-", input="\n".join(batch) + "\n")
+            deleted += len(batch)
+        return {"history_pruned": pruned, "objects_deleted": deleted}
+
+    def _heads(self) -> dict[str, tuple[int, str]]:
+        """Every group's HEAD.json with its size and modtime, in one listing: a cheap "did anyone commit?" check."""
+        result = self.rclone.raw("lsjson", "-R", "--files-only", "--max-depth", "2", "--include", "/*/HEAD.json", self._p("groups"))
+        if result.returncode != 0:
+            if Rclone.is_missing(result):
+                return {}
+            self.rclone.check(result)
+        return {item["Path"]: (item["Size"], item["ModTime"]) for item in json.loads(result.stdout or "[]")}
 
 
 def _corrupt(where: str, why: str) -> RemoteCorrupt:

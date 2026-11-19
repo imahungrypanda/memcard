@@ -122,3 +122,88 @@ def test_probe_leftovers_dont_block_claiming_an_empty_folder(store):
     (store.dir / ".memcard-probe-abc123").write_text("x")
     store.commit(manifest(1, None))
     assert store.head("g").generation == 1
+
+
+def test_missing_names_only_the_absent_objects(store, tmp_path):
+    shas = []
+    for name in ("a", "b"):
+        p = tmp_path / name
+        p.write_bytes(name.encode())
+        shas.append(sha256(p))
+    absent = "ff" + "0" * 62  # its prefix folder doesn't exist either
+    assert store.missing({shas[0], absent}) == {shas[0], absent}  # no objects/ folder yet
+    store.upload({shas[0]: tmp_path / "a"})
+    assert store.missing({shas[0], shas[1], absent}) == {shas[1], absent}
+    assert store.missing(set()) == set()
+
+
+def test_uploads_are_stamped_with_the_upload_time(store, tmp_path):
+    """gc's grace period reads object mtimes as upload times. A source with an
+    old mtime (a re-upload from the object cache, say) must not look collectable."""
+    import os
+    import time
+
+    p = tmp_path / "old.srm"
+    p.write_bytes(b"old save")
+    three_days_ago = time.time() - 3 * 86400
+    os.utime(p, (three_days_ago, three_days_ago))
+    store.upload({sha256(p): p})
+    store.commit(manifest(1, None))  # references nothing: the object is unreferenced
+    assert store.gc(keep=2)["objects_deleted"] == 0
+    assert os.stat(p).st_mtime == three_days_ago, "upload must not touch its source"
+
+
+def test_gc_deletes_nothing_if_a_commit_lands_while_it_runs(store, tmp_path, monkeypatch):
+    """#2 from gc's side: a commit after gc read that group's HEAD may reference an object gc thinks is garbage."""
+    from memcard.store import remote as remote_mod
+
+    p = tmp_path / "reverted.srm"
+    p.write_bytes(b"old save, still on the remote")
+    sha = sha256(p)
+    store.upload({sha: p})
+    store.commit(manifest(1, None))  # nothing references it yet
+    monkeypatch.setattr(remote_mod, "GC_GRACE", remote_mod.timedelta(seconds=-60))
+    real_raw = store.rclone.raw
+
+    def another_machine_commits_after_gc_read_heads(*args, **kw):
+        out = real_raw(*args, **kw)
+        if args[0] == "lsjson" and args[-1].endswith("/objects") and store.head("g").generation == 1:
+            store.commit(manifest(2, 1, {"s.srm": FileEntry(sha, 29)}))  # e.g. a push that reverted to it
+        return out
+
+    monkeypatch.setattr(store.rclone, "raw", another_machine_commits_after_gc_read_heads)
+    with pytest.raises(RemoteChanged, match="deleted nothing"):
+        store.gc(keep=5)
+    assert (store.dir / "objects" / object_rel(sha)).exists()
+    monkeypatch.setattr(store.rclone, "raw", real_raw)
+    assert store.gc(keep=5)["objects_deleted"] == 0  # now referenced
+
+
+def test_gc_stops_between_batches_when_a_commit_lands(store, tmp_path, monkeypatch):
+    from memcard.store import remote as remote_mod
+
+    shas = {}
+    for i in range(3):
+        p = tmp_path / f"o{i}"
+        p.write_bytes(f"object {i}".encode())
+        shas[sha256(p)] = p
+    store.upload(shas)
+    store.commit(manifest(1, None))
+    monkeypatch.setattr(remote_mod, "GC_GRACE", remote_mod.timedelta(seconds=-60))
+    monkeypatch.setattr(remote_mod, "GC_BATCH", 1)
+    real_raw = store.rclone.raw
+    deletes = []
+
+    def commit_after_first_batch(*args, **kw):
+        out = real_raw(*args, **kw)
+        if args[0] == "delete" and args[1].endswith("/objects"):
+            deletes.append(1)
+            if len(deletes) == 1:
+                store.commit(manifest(2, 1))
+        return out
+
+    monkeypatch.setattr(store.rclone, "raw", commit_after_first_batch)
+    with pytest.raises(RemoteChanged, match="after deleting 1"):
+        store.gc(keep=5)
+    assert len(deletes) == 1
+    assert len([p for p in (store.dir / "objects").rglob("*") if p.is_file()]) == 2

@@ -272,7 +272,8 @@ class Engine:
         for a in uploads:
             if scan.sha256(out / a.path) != a.entry.sha256:
                 raise LocalChanged(f"{a.path} changed while syncing.")
-        self.store.upload({a.entry.sha256: out / a.path for a in uploads})
+        staged = {a.entry.sha256: out / a.path for a in uploads}
+        self.store.upload(staged)
 
         now = utcnow()
         files = dict(remote.files) if remote else {}
@@ -287,8 +288,30 @@ class Engine:
         manifest = Manifest(group.id, (parent or 0) + 1, parent, now, self.cfg.machine_id, machines, files)
         self.deadline.check()
         self.store.commit(manifest)
+        self._ensure_objects(staged, remote)
         result.pushed = [a.path for a in pushes]
         return manifest.generation
+
+    def _ensure_objects(self, sources: dict[str, Path], parent: Manifest | None) -> None:
+        """Put back any object the new HEAD needs that the remote no longer has.
+
+        upload() skips objects that are already there, and an old unreferenced
+        one is fair game for gc on another machine until our HEAD references
+        it (#2). Objects the parent HEAD already referenced were never
+        collectable, so only the new ones are checked.
+        """
+        known = {e.sha256 for e in parent.files.values()} if parent else set()
+        # HEAD is already committed, so this runs to the end: a deadline or a
+        # cancel here would leave a lost object that no later sync re-uploads
+        # (it sees L == R and does nothing).
+        deadline, self.rclone.deadline = self.rclone.deadline, None
+        try:
+            lost = self.store.missing(set(sources) - known)
+            if lost:
+                log.warning("re-uploading %d object(s) the remote lost before our commit", len(lost))
+                self.store.upload({sha: sources[sha] for sha in lost})
+        finally:
+            self.rclone.deadline = deadline
 
     def _pull(self, group: Group, actions: list[planner.Action], run_dir: Path, result: GroupResult) -> None:
         pulls = [a for a in actions if a.kind == "pull"]
