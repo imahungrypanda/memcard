@@ -413,10 +413,11 @@ cloud, with EmuDeck-shaped symlinks. These parts need your hardware:
 - [ ] While a game runs, Versions still opens, but **Restore** is greyed out with "You can restore after you quit the game".
 - [ ] Each Save groups row fits the panel: name and description on the left, a **Versions** button on the right, nothing cut off.
 - [ ] In Cloud versions, **B** goes back one screen (confirm → version → list → closed), never straight out.
-- [ ] Press **Close** on the "Restoring…" screen: the restore still finishes and its toast appears.
+- [ ] Press **B** on the "Restoring…" screen: the restore still finishes and its toast appears, and opening Versions
+      again meanwhile shows Restore greyed out until it's done.
 - [ ] For Dolphin (restored whole), a long file list on the version screen scrolls with the D-pad.
-- [ ] Make a conflict first (change a save on both machines), then restore that group: the conflict prompt appears on top of
-      Cloud versions, and after choosing, the restore goes ahead.
+- [ ] Change a save on both machines, then (without syncing this machine in between) restore that group from Versions:
+      the conflict prompt appears on top of Cloud versions, and after choosing, the restore goes ahead.
 - [ ] Find EmuDeck saves → Add maps your shortcuts. Check what would sync and Sync now
       show sensible results.
 

@@ -26,7 +26,7 @@ import {
   type Settings,
 } from "./backend";
 import { askResolutions } from "./conflicts";
-import { showHistory } from "./history";
+import { isRestoring, showHistory } from "./history";
 import { blockedReason } from "./historyText";
 import { controller, registerLaunchHooks } from "./launch";
 import { checkForUpdate, checkIfStale, installUpdate, loadInstalledVersion, onUpdateState, startUpdateChecks, updateState } from "./updater";
@@ -237,7 +237,7 @@ function Content() {
                 showHistory(
                   g,
                   groups?.machine ?? { id: "", name: "this machine" },
-                  () => blockedReason(controller.isRunning(), controller.isBusy() || !!busy, g.id in (cachedGroups()?.pending ?? {}), g.label || g.id),
+                  () => blockedReason(controller.isRunning(), controller.isBusy() || !!busy || isRestoring(), g.id in (cachedGroups()?.pending ?? {}), g.label || g.id),
                   () => refreshGroups(),
                 )
               }

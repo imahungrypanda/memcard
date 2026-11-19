@@ -49,6 +49,14 @@ interface Props {
 
 type View = "list" | "detail" | "confirm" | "working";
 
+// One restore at a time, across every Cloud versions window: closing "Restoring…" doesn't stop it,
+// and a window opened meanwhile must not start another.
+let restoring = false;
+
+export function isRestoring(): boolean {
+  return restoring;
+}
+
 function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
   const label = group.label || group.id;
   const [view, setView] = useState<View>("list");
@@ -60,7 +68,6 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
   const [error, setError] = useState<MemcardError | null>(null);
   const [loading, setLoading] = useState(true);
   const request = useRef(0); // only the newest list request may update the screen
-  const running = useRef(false); // one restore at a time, however fast Restore is pressed
 
   const load = async (unit: string | null) => {
     const mine = ++request.current;
@@ -95,38 +102,43 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
   };
 
   const restore = async (resolve: string[] = []): Promise<void> => {
-    if (!data || !version || (running.current && !resolve.length)) return;
-    running.current = true;
-    setView("working");
-    setError(null);
-    const units = data.unit === "group" ? [] : picked;
-    const r = await memcard<RestoreData>(restoreArgs(group.id, version.generation, data.unit, units, resolve));
-    const out = r.result;
-    onChanged(); // the first sync may have pushed, pulled or recorded a conflict, whatever happened next
-    if (!out?.restored) {
-      const before = out?.results[0];
-      if (before?.conflicts.length && !resolve.length) {
-        const specs = await askResolutions(out!.results, me);
-        if (specs.length) return restore(specs);
+    if (!data || !version || (restoring && !resolve.length)) return;
+    restoring = true;
+    try {
+      setView("working");
+      setError(null);
+      const units = data.unit === "group" ? [] : picked;
+      const r = await memcard<RestoreData>(restoreArgs(group.id, version.generation, data.unit, units, resolve));
+      const out = r.result;
+      onChanged(); // the first sync may have pushed, pulled or recorded a conflict, whatever happened next
+      if (!out?.restored) {
+        const before = out?.results[0];
+        if (before?.conflicts.length && !resolve.length) {
+          const specs = await askResolutions(out!.results, me);
+          if (specs.length) return await restore(specs);
+        }
+        setError(r.error ?? before?.error ?? { code: "conflicts", message: `Nothing was restored: ${label} has a conflict waiting.` });
+        setView("detail");
+        return;
       }
-      running.current = false;
-      setError(r.error ?? before?.error ?? { code: "conflicts", message: `Nothing was restored: ${label} has a conflict waiting.` });
+      const after = out.results[out.results.length - 1];
+      if (after && (after.status === "error" || after.status === "skipped")) {
+        toaster.toast({ title: `Memcard · ${label}`, body: downloadPendingToast(label, after.error?.message || "it stopped"), duration: 8000 });
+      } else {
+        toaster.toast({ title: `Memcard · ${label}`, body: restoredToast(label, data.unit, units, version, undefined, name), duration: 6000 });
+        if (after?.conflicts.length) {
+          toaster.toast({ title: `Memcard · ${label}`, body: "A save changed here during the restore. It's listed under Resolve conflicts.", duration: 6000 });
+        }
+      }
+      setView("list");
+      setFilter(null);
+      load(null);
+    } catch (e) {
+      setError({ code: "plugin", message: "The restore couldn't be started.", detail: String(e) });
       setView("detail");
-      return;
+    } finally {
+      if (!resolve.length) restoring = false; // the outer call owns the flag across a --resolve retry
     }
-    running.current = false;
-    const after = out.results[out.results.length - 1];
-    if (after && (after.status === "error" || after.status === "skipped")) {
-      toaster.toast({ title: `Memcard · ${label}`, body: downloadPendingToast(label, errorText(after.error) || "it stopped"), duration: 8000 });
-    } else {
-      toaster.toast({ title: `Memcard · ${label}`, body: restoredToast(label, data.unit, units, version, undefined, name), duration: 6000 });
-      if (after?.conflicts.length) {
-        toaster.toast({ title: `Memcard · ${label}`, body: "A save changed here during the restore. It's listed under Resolve conflicts.", duration: 6000 });
-      }
-    }
-    setView("list");
-    setFilter(null);
-    load(null);
   };
 
   const header = (title: string, sub?: string) => (
