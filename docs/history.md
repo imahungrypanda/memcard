@@ -1,6 +1,6 @@
 # Memcard — cloud versions (`memcard history`)
 
-Status: **approved 2026-11-18**; updated after review. Built in #16 (gc race) and the PRs that follow. Progress is tracked in `tasks/todo.md` under **Next**.
+Status: **approved 2026-11-18**; updated after review. Built: the gc race in #16, the core (`memcard history`) in the PR after it; the Decky screens follow. Progress is tracked in `tasks/todo.md` under **Next**.
 
 Mock of the Decky flow: <https://claude.ai/artifact/Gx9LLozbY7ic3hQHFJ221D>. The link is private to the
 owner's claude.ai account, so it won't open for everyone. Section 6 describes the same screens in words.
