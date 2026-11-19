@@ -1,7 +1,9 @@
 import { toaster } from "@decky/api";
 import { DialogButton, Dropdown, Focusable, ModalRoot, showModal, Spinner, ToggleField } from "@decky/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { errorText, memcard } from "./backend";
+import { memcard } from "./backend";
+import { errorText } from "./errorText";
+import { DetailsButton } from "./textView";
 import { askResolutions } from "./conflicts";
 import {
   changeSummary,
@@ -147,7 +149,12 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
       {sub && <div style={{ marginBottom: 10, opacity: 0.75 }}>{sub}</div>}
     </>
   );
-  const problem = error && <div style={{ color: "#f2b33d", margin: "8px 0" }}>✗ {errorText(error)}</div>;
+  const problem = error && (
+    <div style={{ margin: "8px 0" }}>
+      <div style={{ color: "#f2b33d" }}>✗ {errorText(error)}</div>
+      <DetailsButton error={error} />
+    </div>
+  );
 
   if (view === "list" || !data || !version) {
     const shown = data?.versions ?? [];
@@ -250,10 +257,11 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
         {restorable.map((d) =>
           data.unit === "group" ? (
             d.files.map((f) => (
-              <div key={f.path} style={{ padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,.08)" }}>
+              // A focus stop per row: the D-pad scrolls by moving focus, not over plain divs.
+              <Focusable key={f.path} onActivate={() => {}} style={{ padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,.08)" }}>
                 <div style={{ fontWeight: "bold" }}>{name(f.path)}</div>
                 <div style={{ fontSize: "0.8em", opacity: 0.75 }}>{thenNow(f.then, f.now, me, data.machines)}</div>
-              </div>
+              </Focusable>
             ))
           ) : (
             <ToggleField

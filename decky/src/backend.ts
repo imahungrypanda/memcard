@@ -60,8 +60,3 @@ export function onGroups(l: (g: GroupsData | null) => void): () => void {
 export function isMapped(appid: number): boolean {
   return !!groups?.groups.some((g) => g.appids.includes(appid));
 }
-
-export function errorText(e: { message: string; hint?: string | null } | null | undefined): string {
-  if (!e) return "";
-  return e.hint ? `${e.message} ${e.hint}` : e.message;
-}

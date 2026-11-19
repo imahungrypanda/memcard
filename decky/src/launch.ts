@@ -1,6 +1,7 @@
 import { toaster } from "@decky/api";
 import { Router } from "@decky/ui";
-import { cachedGroups, currentSettings, errorText, isMapped, memcard, refreshGroups } from "./backend";
+import { cachedGroups, currentSettings, isMapped, memcard, refreshGroups } from "./backend";
+import { errorText } from "./errorText";
 import { askResolutions } from "./conflicts";
 import { describe, LaunchController } from "./launchController";
 import type { SyncData } from "./types";
