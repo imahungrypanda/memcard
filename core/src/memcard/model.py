@@ -74,6 +74,14 @@ def _files_to(files: Files) -> dict[str, Any]:
     return {path: files[path].to_dict() for path in sorted(files)}
 
 
+def _optional_int(v: Any) -> int | None:
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, int):
+        raise ValueError(f"expected a generation number, got {v!r}")
+    return v
+
+
 @dataclass
 class Manifest:
     """A group's committed state on the remote (``groups/<id>/HEAD.json``)."""
@@ -85,9 +93,10 @@ class Manifest:
     committed_by: str
     machines: dict[str, str] = field(default_factory=dict)
     files: Files = field(default_factory=dict)
+    restored_from: int | None = None  # set on a commit that restored saves from this earlier generation
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "format": FORMAT,
             "group": self.group,
             "generation": self.generation,
@@ -97,6 +106,9 @@ class Manifest:
             "machines": dict(sorted(self.machines.items())),
             "files": _files_to(self.files),
         }
+        if self.restored_from is not None:
+            d["restored_from"] = self.restored_from  # optional: older clients ignore it, so FORMAT stays 1
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Manifest:
@@ -105,11 +117,12 @@ class Manifest:
         return cls(
             group=d["group"],
             generation=int(d["generation"]),
-            parent=d.get("parent"),
+            parent=_optional_int(d.get("parent")),
             committed_at=d["committed_at"],
             committed_by=d["committed_by"],
             machines=dict(d.get("machines", {})),
             files=_files_from(d.get("files", {})),
+            restored_from=_optional_int(d.get("restored_from")),
         )
 
 

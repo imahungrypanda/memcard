@@ -78,7 +78,7 @@ class RemoteConfig:
 @dataclass
 class SyncConfig:
     trash_versions: int = 5
-    history_versions: int = 5
+    history_versions: int = 20
     periodic_minutes: int = 0
     launch_timeout_s: int = 20
     exit_settle_s: int = 30
@@ -240,7 +240,7 @@ name = "{name}"   # shown in conflict prompts as "last written by ..."
 
 [sync]
 trash_versions = 5     # local versions kept before any overwrite or delete
-history_versions = 5   # remote generations kept per group
+history_versions = 20  # cloud versions kept per group (`memcard gc` prunes the rest)
 periodic_minutes = 0   # background sync interval; 0 = off
 launch_timeout_s = 20  # pre-launch sync gives up after this and starts the game
 exit_settle_s = 30     # max wait for the emulator to fully exit before pushing
