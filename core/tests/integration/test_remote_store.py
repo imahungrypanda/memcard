@@ -177,3 +177,33 @@ def test_gc_deletes_nothing_if_a_commit_lands_while_it_runs(store, tmp_path, mon
     assert (store.dir / "objects" / object_rel(sha)).exists()
     monkeypatch.setattr(store.rclone, "raw", real_raw)
     assert store.gc(keep=5)["objects_deleted"] == 0  # now referenced
+
+
+def test_gc_stops_between_batches_when_a_commit_lands(store, tmp_path, monkeypatch):
+    from memcard.store import remote as remote_mod
+
+    shas = {}
+    for i in range(3):
+        p = tmp_path / f"o{i}"
+        p.write_bytes(f"object {i}".encode())
+        shas[sha256(p)] = p
+    store.upload(shas)
+    store.commit(manifest(1, None))
+    monkeypatch.setattr(remote_mod, "GC_GRACE", remote_mod.timedelta(seconds=-60))
+    monkeypatch.setattr(remote_mod, "GC_BATCH", 1)
+    real_raw = store.rclone.raw
+    deletes = []
+
+    def commit_after_first_batch(*args, **kw):
+        out = real_raw(*args, **kw)
+        if args[0] == "delete" and args[1].endswith("/objects"):
+            deletes.append(1)
+            if len(deletes) == 1:
+                store.commit(manifest(2, 1))
+        return out
+
+    monkeypatch.setattr(store.rclone, "raw", commit_after_first_batch)
+    with pytest.raises(RemoteChanged, match="after deleting 1"):
+        store.gc(keep=5)
+    assert len(deletes) == 1
+    assert len([p for p in (store.dir / "objects").rglob("*") if p.is_file()]) == 2

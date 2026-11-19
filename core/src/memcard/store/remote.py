@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 MARKER = "memcard-remote.json"
 PROBE_PREFIX = ".memcard-probe-"  # setup's round-trip test file; may be left behind if its delete failed
 GC_GRACE = timedelta(days=1)  # don't collect objects a push in flight may be about to commit
+GC_BATCH = 200  # objects per delete call; every HEAD is re-checked before each one
 
 
 def object_rel(sha: str) -> str:
@@ -251,17 +252,21 @@ class RemoteStore:
             doomed.append(item["Path"])
         # A commit that landed after we read its group's HEAD may reference an
         # object we're about to delete: an old one that its push found already
-        # uploaded (#2). Re-list every HEAD right before deleting and back off
-        # if any changed. What's left is the gap between this listing and the
-        # delete, which the committing machine's post-commit check covers.
-        if doomed and self._heads() != heads_before:
-            raise RemoteChanged(
-                "Another machine synced while gc was running, so it deleted nothing.",
-                hint="Run `memcard gc` again.",
-            )
-        if doomed:
-            self.rclone("delete", self._p("objects"), "--files-from", "-", input="\n".join(doomed) + "\n")
-        return {"history_pruned": pruned, "objects_deleted": len(doomed)}
+        # uploaded (#2). Re-list every HEAD before each batch and stop if any
+        # changed. What's left is one batch's delete call; a commit landing
+        # just before it is caught by that machine's post-commit check.
+        deleted = 0
+        for i in range(0, len(doomed), GC_BATCH):
+            if self._heads() != heads_before:
+                done = f"stopped after deleting {deleted} unused object(s)" if deleted else "deleted nothing"
+                raise RemoteChanged(
+                    f"Another machine synced while gc was running, so it {done}.",
+                    hint="Run `memcard gc` again.",
+                )
+            batch = doomed[i:i + GC_BATCH]
+            self.rclone("delete", self._p("objects"), "--files-from", "-", input="\n".join(batch) + "\n")
+            deleted += len(batch)
+        return {"history_pruned": pruned, "objects_deleted": deleted}
 
     def _heads(self) -> dict[str, tuple[int, str]]:
         """Every group's HEAD.json with its size and modtime, in one listing: a cheap "did anyone commit?" check."""
