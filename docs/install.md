@@ -310,8 +310,24 @@ Nothing is overwritten or deleted without a copy.
   memcard sync                                                 # push the restored version
   ```
 
-- **Remote history:** the last 5 versions of each group stay on the remote
-  (`history_versions`). To copy any of them out as plain files:
+- **Cloud versions:** every sync that uploads something makes a new version of the
+  group in the cloud. `memcard gc` keeps the last 20 per group (`history_versions`).
+  List them, and put one game's save back on every machine:
+
+  ```bash
+  memcard history list retroarch                        # newest first, with what each changed
+  memcard history list retroarch --unit FireRed.srm     # only versions that changed that save
+  memcard history restore retroarch 12 --unit FireRed.srm
+  ```
+
+  A restore first syncs (so nothing unsynced is lost), then saves a new version in which
+  that save is copied from version 12, then downloads it here. This machine's current
+  copy goes to the trash first, your other machines get it on their next sync, and the
+  version you replaced stays in the list, so you can undo it. Without `--unit`, every save
+  that existed in version 12 goes back. For emulators that sync as one unit (Dolphin,
+  Citra, Cemu, Ryujinx, xemu) that's the only choice.
+
+  To copy any version out as plain files instead:
 
   ```bash
   memcard export retroarch ~/rescue                 # current

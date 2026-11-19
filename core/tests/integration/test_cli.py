@@ -427,3 +427,36 @@ def test_manual_sync_refuses_while_a_game_runs(machine, capsys, monkeypatch):
     # detect mapped retroarch to its Flatpak, so RetroArch open outside Memcard counts too
     monkeypatch.setattr(triggers, "running_flatpaks", lambda: {"org.libretro.RetroArch"})
     assert run("sync") == 1
+
+
+def test_history_list_and_restore_over_json(machine, capsys, monkeypatch):
+    from memcard import triggers
+
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    (machine / "fr.srm").write_bytes(b"v1")
+    run("sync")
+    (machine / "fr.srm").write_bytes(b"v2")
+    run("sync")
+    capsys.readouterr()
+
+    assert run("--json", "history", "list", "retroarch") == 0
+    data = result(events(capsys))
+    assert [v["generation"] for v in data["versions"]] == [2, 1] and data["versions"][0]["current"]
+
+    assert run("--json", "history", "restore", "retroarch", "1") == 4  # a file-unit group must name its saves
+    assert "--all" in events(capsys)[-1]["error"]["hint"]
+    assert run("--json", "history", "restore", "retroarch", "1", "--unit", "fr.srm") == 0
+    evts = events(capsys)
+    assert evts[-1]["event"] == "result"
+    out = result(evts)
+    assert out["restored"] == {"group": "retroarch", "generation": 3, "restored_from": 1, "units": ["fr.srm"]}
+    assert [r["pulled"] for r in out["results"]] == [[], ["fr.srm"]] and (machine / "fr.srm").read_bytes() == b"v1"
+    assert any(e["event"] == "restore_committed" for e in evts)
+
+    # refused while a game runs, like a plain sync
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: {"org.libretro.RetroArch"})
+    assert run("--json", "history", "restore", "retroarch", "2", "--all") == 1
+    assert events(capsys)[-1]["error"]["code"] == "game_running"
+    monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
+    assert run("--json", "history", "restore", "retroarch", "9", "--all") == 4
+    assert run("--json", "history", "list", "retroarch", "--limit", "0") == 4

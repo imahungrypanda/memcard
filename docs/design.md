@@ -298,6 +298,8 @@ memcard sync --appid N --before-launch|--after-exit [--launch-id ID]    launch h
 memcard trash list|restore
 memcard gc
 memcard export GROUP DIR [--generation N]
+memcard history list GROUP [--limit N] [--unit KEY]       cloud versions, newest first, with what each changed
+memcard history restore GROUP GEN [--unit KEY]... [--resolve …]   put saves back as a new cloud version (history.md)
 memcard timer enable|disable         systemd oneshot timer running `sync --periodic`
 memcard log
 global: --json   exit codes: 0 ok · 2 conflicts pending · 3 offline/unreachable · 4 config · 1 other
@@ -425,4 +427,5 @@ snapshot on the remote would only add "which machines are behind" reporting; I'd
 | (new) | Ships as one ~100 KB zipapp (`scripts/build-zipapp.sh`) | Nothing to install on an immutable OS |
 | (new) | `memcard setup install-rclone` downloads rclone's official static build over HTTPS, checks it against the SHA256SUMS published next to it (integrity, not a defence against a compromised site), and keeps it in Memcard's data dir, which `find_tool` prefers | SteamOS has no rclone and no package manager; the Decky plugin needs a one-button install, and "update" must take effect |
 | (new) | A plain `memcard sync` refuses while a game is running (a launch marker, or a mapped emulator's Flatpak) | A restore under a running emulator is overwritten when it next saves, or pushes a half-flushed save. Syncing around games belongs to the launch hooks. |
+| `export --generation N` for remote versions | `memcard history list/restore` (design in `history.md`): a restore commits a new HEAD built from an older generation, per unit (`--unit` or `--all` for `file`/`dir` groups), and every machine pulls it; manifests carry an optional `restored_from`; `history_versions` default 5 → 20. Listing versions is allowed during a game, at idle priority (three small rclone reads); restoring is not | Restoring by hand meant exporting and copying files back. Per unit, because one RetroArch group holds every RetroArch game. A new commit rather than rewinding HEAD keeps the planner and CAS unchanged and makes the restore itself undoable. |
 | Decky plugin ships memcard via `remote_binary` | The plugin zip bundles the same zipapp as `bin/memcard`, run with the system python3 | Keeps the plugin and the CLI it drives at the same version; Decky's own interpreter is a PyInstaller bundle |

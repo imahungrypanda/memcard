@@ -151,6 +151,32 @@ class RemoteStore:
     def manifest_at(self, group: str, generation: int) -> Manifest | None:
         return self._manifest("groups", group, "history", f"{generation}.json")
 
+    def manifests(self, group: str, generations: list[int]) -> dict[int, Manifest]:
+        """Several history manifests in one rclone call. Ones that vanished (gc) are just absent."""
+        if not generations:
+            return {}
+        self.scratch.mkdir(parents=True, exist_ok=True)
+        inbox = Path(tempfile.mkdtemp(dir=self.scratch, prefix="history-"))
+        try:
+            listing = "\n".join(f"{int(n)}.json" for n in generations) + "\n"
+            self.rclone("copy", self._p("groups", group, "history"), str(inbox), "--files-from", "-", "--no-traverse", input=listing)
+            out = {}
+            for n in generations:
+                path = inbox / f"{int(n)}.json"
+                if not path.is_file():
+                    continue
+                where = f"groups/{group}/history/{n}.json"
+                try:
+                    data = json.loads(path.read_text())
+                    if not isinstance(data, dict):
+                        raise ValueError("not a JSON object")
+                    out[n] = Manifest.from_dict(data)
+                except (KeyError, TypeError, ValueError) as e:  # JSONDecodeError is a ValueError
+                    raise _corrupt(where, str(e)) from e
+            return out
+        finally:
+            shutil.rmtree(inbox, ignore_errors=True)
+
     # --- objects -------------------------------------------------------------------
 
     def upload(self, files: dict[str, Path]) -> None:

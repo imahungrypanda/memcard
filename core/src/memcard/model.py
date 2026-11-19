@@ -85,9 +85,10 @@ class Manifest:
     committed_by: str
     machines: dict[str, str] = field(default_factory=dict)
     files: Files = field(default_factory=dict)
+    restored_from: int | None = None  # set on a commit that restored saves from this earlier generation
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "format": FORMAT,
             "group": self.group,
             "generation": self.generation,
@@ -97,6 +98,9 @@ class Manifest:
             "machines": dict(sorted(self.machines.items())),
             "files": _files_to(self.files),
         }
+        if self.restored_from is not None:
+            d["restored_from"] = self.restored_from  # optional: older clients ignore it, so FORMAT stays 1
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Manifest:
@@ -110,6 +114,7 @@ class Manifest:
             committed_by=d["committed_by"],
             machines=dict(d.get("machines", {})),
             files=_files_from(d.get("files", {})),
+            restored_from=int(d["restored_from"]) if d.get("restored_from") is not None else None,
         )
 
 

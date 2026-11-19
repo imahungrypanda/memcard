@@ -533,6 +533,81 @@ def cmd_export(ctx: Ctx) -> int:
     return 0
 
 
+def cmd_history_list(ctx: Ctx) -> int:
+    a = ctx.args
+    if a.limit < 1:
+        raise ConfigError("--limit must be at least 1.")
+    group = ctx.cfg.group(a.group)
+    from . import triggers
+
+    if triggers.game_running(ctx.cfg, ctx.dirs):
+        from .transport.proc import lower_priority
+
+        lower_priority()  # browsing is allowed during a game, but never competes with it
+    data = _engine(ctx).history(group, a.limit, a.unit)
+    lines = [f"{group.id} (unit = {data['unit']}), newest first:"]
+    for v in data["versions"]:
+        mark = ("  current" if v["current"] else "") + (f"  (restored from {v['restored_from']})" if v["restored_from"] else "")
+        lines.append(f"  {v['generation']:>5}  {_when(v['committed_at'])}  {v['machine']}{mark}")
+        if v["changes"] is None:
+            lines.append("         (what it changed is unknown: the version before it was cleaned up)")
+        for c in v["changes"] or []:
+            lines.append(f"         {c['change']:<8} {c['path']}")
+    if not data["versions"]:
+        lines.append("  (no versions" + (f" that changed {a.unit})" if a.unit else ")"))
+    elif data["more"]:
+        lines.append("Older versions exist; use --limit to see more.")
+    lines.append(f"Restore with: memcard history restore {group.id} GENERATION" + ("" if data["unit"] == "group" else " --unit SAVE"))
+    ctx.out(data, "\n".join(lines))
+    return 0
+
+
+def cmd_history_restore(ctx: Ctx) -> int:
+    from . import triggers
+    from .engine import no_decisions
+
+    a = ctx.args
+    group = ctx.cfg.group(a.group)
+    whole = group.single is not None or group.unit == "group"
+    if a.unit and a.all:
+        raise ConfigError("Pass either --unit or --all, not both.")
+    if not whole and not a.unit and not a.all:
+        # One RetroArch group holds every RetroArch game: rolling all of them back must be asked for.
+        raise ConfigError(
+            f"{group.id} holds separate saves (unit = {group.unit}). Say which to restore.",
+            hint=f"--unit SAVE (repeatable; `memcard history list {group.id}` shows them), or --all for every one.",
+        )
+    if triggers.game_running(ctx.cfg, ctx.dirs):
+        raise GameRunning(
+            "A game is running, so Memcard won't touch saves right now.",
+            hint="You can restore after you quit the game.",
+        )
+    if a.resolve:
+        decide = parse_resolutions(a.resolve)
+    elif sys.stdin.isatty() and not a.json and not a.non_interactive:
+        decide = interactive_decider(ctx.cfg.machine_name)
+    else:
+        decide = no_decisions
+
+    def game_started() -> str | None:
+        return "A game started, so the restore stopped." if triggers.game_running(ctx.cfg, ctx.dirs) else None
+
+    results, manifest = _engine(ctx).restore(group, a.generation, a.unit or None, decide, abort_if=game_started)
+    restored = None
+    if manifest:
+        restored = {"group": group.id, "generation": manifest.generation, "restored_from": a.generation, "units": a.unit or None}
+    if manifest is None:
+        text = (f"Nothing was restored: {group.id} has a conflict to settle first. "
+                f"Run `memcard sync {group.id}` (or pass --resolve), then restore again.") if results[0].conflicts else "Nothing was restored."
+    else:
+        text = f"Restored {group.id} from version {a.generation} (now version {manifest.generation}). Your other machines get it on their next sync."
+    ctx.out({"results": [r.to_dict() for r in results], "restored": restored}, text)
+    codes = [r.error.exit_code for r in results if r.error and r.status == "error"]
+    if any(r.conflicts for r in results):
+        codes.append(ConflictsPending.exit_code)
+    return max(codes, default=0)
+
+
 def cmd_timer(ctx: Ctx) -> int:
     from .triggers import UNIT_DIR, timer_units
 
@@ -655,6 +730,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("group")
     sp.add_argument("dest")
     sp.add_argument("--generation", type=int)
+
+    sp = add("history", cmd_history_list, "list or restore earlier cloud versions of a group")
+    hsub = sp.add_subparsers(dest="history_cmd", required=True)
+    hl = hsub.add_parser("list", help="newest first, with what each version changed", parents=[common])
+    hl.add_argument("group")
+    hl.add_argument("--limit", type=int, default=20)
+    hl.add_argument("--unit", help="only versions that changed this save (a unit key, e.g. the file name)")
+    hl.set_defaults(fn=cmd_history_list)
+    hr = hsub.add_parser("restore", help="put saves back to an earlier version, on every machine", parents=[common])
+    hr.add_argument("group")
+    hr.add_argument("generation", type=int)
+    hr.add_argument("--unit", action="append", default=[], help="restore this save (repeatable)")
+    hr.add_argument("--all", action="store_true", help="restore every save that existed in that version")
+    hr.add_argument("--resolve", action="append", default=[], metavar="GROUP[:UNIT]=local|remote|both",
+                    help="settle conflicts the sync before the restore finds")
+    hr.add_argument("--non-interactive", action="store_true", help="never prompt; leave conflicts for later")
+    hr.set_defaults(fn=cmd_history_restore)
 
     sp = add("timer", cmd_timer, "enable/disable periodic background sync")
     sp.add_argument("action", choices=["enable", "disable"])

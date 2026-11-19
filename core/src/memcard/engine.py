@@ -27,9 +27,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import planner, providers, scan
+from . import history, planner, providers, scan
 from .config import Config, Group
-from .errors import AuthError, Cancelled, LocalChanged, LocalPathMissing, MemcardError, Offline, RemoteChanged, Unreachable
+from .errors import AuthError, Cancelled, ConfigError, LocalChanged, LocalPathMissing, MemcardError, Offline, RemoteChanged, Unreachable
 from .events import Events, Silent
 from .model import FileEntry, GroupPlan, Manifest, Resolution, Snapshot, UnitPlan, check_relpath, utcnow
 from .paths import Dirs, atomic_write
@@ -127,32 +127,35 @@ class Engine:
         write); background syncs pass "a game started" so they get out of the way.
         A truthy result stops the sync; a string result is used as the message."""
         self.abort_if = abort_if
-        results: list[GroupResult] = []
         with self.lock():
-            for i, g in enumerate(groups):
-                try:
-                    self._safe_point()
-                except Cancelled:
-                    self._record_pending(results)
-                    raise
-                self.events.emit("group_start", f"Syncing {g.label or g.id}…", group=g.id)
-                try:
-                    r = self._sync_group(g, decide)
-                except LocalPathMissing as e:
-                    r = GroupResult(g.id, "skipped", error=e)
-                except MemcardError as e:
-                    r = GroupResult(g.id, "error", error=e)
-                    if isinstance(e, FATAL_FOR_RUN):
-                        results.append(r)
-                        self._emit_result(r)
-                        for rest in groups[i + 1:]:
-                            skipped = GroupResult(rest.id, "skipped", error=e)
-                            results.append(skipped)
-                            self._emit_result(skipped)
-                        break
-                results.append(r)
-                self._emit_result(r)
-            self._record_pending(results)
+            return self._sync_locked(groups, decide)
+
+    def _sync_locked(self, groups: list[Group], decide: Decider, verb: str = "Syncing") -> list[GroupResult]:
+        results: list[GroupResult] = []
+        for i, g in enumerate(groups):
+            try:
+                self._safe_point()
+            except Cancelled:
+                self._record_pending(results)
+                raise
+            self.events.emit("group_start", f"{verb} {g.label or g.id}…", group=g.id)
+            try:
+                r = self._sync_group(g, decide)
+            except LocalPathMissing as e:
+                r = GroupResult(g.id, "skipped", error=e)
+            except MemcardError as e:
+                r = GroupResult(g.id, "error", error=e)
+                if isinstance(e, FATAL_FOR_RUN):
+                    results.append(r)
+                    self._emit_result(r)
+                    for rest in groups[i + 1:]:
+                        skipped = GroupResult(rest.id, "skipped", error=e)
+                        results.append(skipped)
+                        self._emit_result(skipped)
+                    break
+            results.append(r)
+            self._emit_result(r)
+        self._record_pending(results)
         return results
 
     def _record_pending(self, results: list[GroupResult]) -> None:
@@ -349,6 +352,120 @@ class Engine:
         self.trash.prune(group.id)
         result.pulled = [a.path for a in pulls]
 
+    # --- cloud versions ----------------------------------------------------------------
+
+    def history(self, group: Group, limit: int = 20, unit: str | None = None) -> dict[str, Any]:
+        """The newest ``limit`` cloud versions of a group, each with what it changed and how it differs from now.
+
+        Three rclone calls however long the list is: list history/, read HEAD, copy the manifests.
+        """
+        head = self.store.head(group.id)
+        if head is None:
+            return {"group": group.id, "unit": _unit_kind(group), "head": None, "machines": {}, "more": False, "versions": []}
+        # A history file newer than HEAD is a commit that never landed (it died, or lost the CAS race).
+        gens = [g for g in self.store.history(group.id) if g < head.generation]
+        wanted = gens[-limit:]  # plus HEAD itself below, and one more for the oldest one's diff
+        fetched = self.store.manifests(group.id, gens[-(limit + 1):])
+        fetched[head.generation] = head  # HEAD is authoritative for the current generation
+        shown = sorted([*wanted, head.generation], reverse=True)[:limit]
+
+        names: dict[str, str] = {}
+        for g in sorted(fetched):
+            names.update(fetched[g].machines)
+
+        def who(machine_id: str | None) -> str:
+            return names.get(machine_id or "", "another machine")
+
+        def side(e: FileEntry | None) -> dict[str, Any] | None:
+            return {"size": e.size, "written_at": e.written_at, "written_by": e.written_by, "machine": who(e.written_by)} if e else None
+
+        versions = []
+        for g in shown:
+            m = fetched.get(g)
+            if m is None:
+                continue  # pruned by a gc between the listing and the copy
+            parent = fetched.get(m.parent) if m.parent is not None else None
+            changes = history.diff(parent.files if parent else ({} if m.parent is None else None), m.files, group)
+            if unit is not None and not any(c.unit == unit for c in changes or []):
+                continue
+            current = g == head.generation
+            versions.append({
+                "generation": g,
+                "committed_at": m.committed_at,
+                "committed_by": m.committed_by,
+                "machine": who(m.committed_by),
+                "restored_from": m.restored_from,
+                "current": current,
+                "changes": [c.to_dict() for c in changes] if changes is not None else None,
+                "differs": [] if current else [
+                    {"unit": d.unit, "restorable": d.restorable,
+                     "files": [{"path": p, "then": side(a), "now": side(b)} for p, a, b in d.files]}
+                    for d in history.compare(m.files, head.files, group)
+                ],
+            })
+        return {"group": group.id, "unit": _unit_kind(group), "head": head.generation, "machines": names,
+                "more": len(gens) + 1 > limit, "versions": versions}
+
+    def restore(self, group: Group, generation: int, units: list[str] | None, decide: Decider = no_decisions,
+                abort_if: Callable[[], object] | None = None) -> tuple[list[GroupResult], Manifest | None]:
+        """Commit a new cloud version with ``units`` put back to how ``generation`` had them, then pull it here.
+
+        One lock around three steps: sync (local changes are pushed and become
+        a version of their own, never lost to the restore; ``decide`` settles
+        only this sync's conflicts), commit the restore, sync again with no
+        decisions (a conflict there is left for the user, never auto-resolved
+        over the restore). If the first sync doesn't come back clean, nothing
+        is restored. Returns both syncs' results and the committed manifest.
+        """
+        label = group.label or group.id
+        self.abort_if = abort_if
+        with self.lock():
+            before = self._sync_locked([group], decide, verb="Syncing before restoring:")[0]
+            if before.status != "ok" or before.conflicts:
+                return [before], None
+            self._safe_point()
+            for attempt in range(ATTEMPTS):
+                try:
+                    manifest = self._commit_restore(group, generation, units)
+                    break
+                except RemoteChanged as e:
+                    if attempt == ATTEMPTS - 1:
+                        raise
+                    log.info("retrying restore of %s: %s", group.id, e.message)
+            self.events.emit("restore_committed", f"{label}: saved the restored version to the cloud.", group=group.id,
+                             generation=manifest.generation, restored_from=generation)
+            try:
+                after = self._sync_locked([group], no_decisions, verb="Downloading the restored")[0]
+            except Cancelled as e:
+                raise Cancelled(
+                    "A game started, so the restore stopped before changing this machine's saves.",
+                    hint="The cloud already has the restored version; this machine gets it on its next sync.",
+                ) from e
+        return [before, after], manifest
+
+    def _commit_restore(self, group: Group, generation: int, units: list[str] | None) -> Manifest:
+        head = self.store.head(group.id)
+        if head is None:
+            raise MemcardError(f"There's nothing in the cloud for {group.id} yet.")
+        if generation == head.generation:
+            raise MemcardError(f"Version {generation} is already the current one, so there's nothing to restore.")
+        old = self.store.manifest_at(group.id, generation) if generation < head.generation else None
+        if old is None or (old.group, old.generation) != (group.id, generation):
+            raise ConfigError(f"There's no version {generation} of {group.id} in the cloud.", hint="`memcard history list` shows them.")
+        now = utcnow()
+        files = history.restore_files(head.files, old.files, units, group, self.cfg.machine_id, now)
+        # Download (and verify) what the restore brings back: proves it's still
+        # there and intact, and leaves it cached for the pull that follows.
+        cached = self.store.fetch({e.sha256 for e in files.values()} - {e.sha256 for e in head.files.values()})
+        machines = dict(head.machines)
+        machines[self.cfg.machine_id] = self.cfg.machine_name
+        manifest = Manifest(group.id, head.generation + 1, head.generation, now, self.cfg.machine_id, machines, files,
+                            restored_from=generation)
+        self.deadline.check()
+        self.store.commit(manifest)
+        self._ensure_objects(cached, head)
+        return manifest
+
     # --- other operations ----------------------------------------------------------------
 
     def export(self, group: Group, dest: Path, generation: int | None = None) -> list[str]:
@@ -362,6 +479,10 @@ class Engine:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(objects[e.sha256], target)
         return sorted(manifest.files)
+
+
+def _unit_kind(group: Group) -> str:
+    return "group" if group.single else group.unit
 
 
 def _expect(copy: Path | None, expected: FileEntry | None, rel: str) -> None:
