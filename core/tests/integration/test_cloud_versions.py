@@ -14,7 +14,8 @@ def history(machine, **kw):
 
 
 def restore(machine, gen, units=None, decide=engine_mod.no_decisions, abort_if=None):
-    return machine.engine().restore(machine.group, gen, units, decide, abort_if)
+    results, manifest, _ = machine.engine().restore(machine.group, gen, units, decide, abort_if)
+    return results, manifest
 
 
 def two_versions(world):
@@ -156,8 +157,100 @@ def test_a_game_starting_after_the_commit_stops_before_touching_this_machine(wor
         return committed[-1]
 
     deck_engine._commit_restore = commit_then_game_starts
-    with pytest.raises(Cancelled, match="restore stopped") as e:
-        deck_engine.restore(deck.group, 1, ["zelda.srm"], abort_if=lambda: "A game started." if committed else None)
-    assert "cloud already has" in e.value.hint
+    results, manifest, _ = deck_engine.restore(deck.group, 1, ["zelda.srm"], abort_if=lambda: "A game started." if committed else None)
+    after = results[-1]
+    assert manifest and after.status == "error" and isinstance(after.error, Cancelled)
+    assert after.error.message.startswith("A game started.") and "cloud already has" in after.error.hint
     assert deck.read("zelda.srm") == b"zelda v2", "nothing written under the game"
     assert deck.sync().pulled == ["zelda.srm"] and deck.read("zelda.srm") == b"zelda v1"
+
+
+def test_a_game_starting_at_the_download_stops_it_with_the_same_message(world):
+    """The realistic window: after the scan and the fetch, at _pull's last safe point."""
+    from memcard.errors import Cancelled
+
+    deck, _ = two_versions(world)
+    eng = deck.engine()
+    real = eng._commit_restore
+    calls = []
+
+    def commit(*a):
+        calls.append("commit")
+        return real(*a)
+
+    def game_started():
+        if "commit" in calls:
+            calls.append("check")
+        return "A game started." if calls.count("check") >= 2 else None  # pass _sync_locked's check, stop at _pull's
+
+    eng._commit_restore = commit
+    results, manifest, _ = eng.restore(deck.group, 1, ["zelda.srm"], abort_if=game_started)
+    assert manifest and isinstance(results[-1].error, Cancelled) and "cloud already has" in results[-1].error.hint
+    assert deck.read("zelda.srm") == b"zelda v2"
+
+
+def test_a_bad_request_fails_before_anything_syncs(world):
+    from memcard.errors import ConfigError
+
+    deck, _ = two_versions(world)
+    deck.write("metroid.srm", b"unsynced")
+    with pytest.raises(ConfigError, match="no save 'typo.srm'"):
+        restore(deck, 1, ["typo.srm"])
+    assert deck.engine().store.head("ra").generation == 2, "the unsynced save wasn't pushed for a request that can't run"
+
+
+def test_a_missing_save_folder_restores_nothing(world):
+    import shutil
+
+    deck, _ = two_versions(world)
+    shutil.rmtree(deck.saves)
+    results, manifest = restore(deck, 1, ["zelda.srm"])
+    assert manifest is None and results[0].status == "skipped"
+    assert deck.engine().store.head("ra").generation == 2
+
+
+def test_another_commit_on_top_before_the_read_back_still_counts(world, monkeypatch):
+    from memcard.errors import RemoteChanged
+
+    deck, pc = two_versions(world)
+    pc.write("metroid.srm", b"metroid from pc")
+    real_commit = RemoteStore.commit
+    done = []
+
+    def lands_then_pc_commits(self, manifest):
+        real_commit(self, manifest)
+        if manifest.restored_from and not done:
+            done.append(True)
+            pc.sync()
+            raise RemoteChanged("HEAD.json didn't take our commit.")
+
+    monkeypatch.setattr(RemoteStore, "commit", lands_then_pc_commits)
+    (_, after), manifest = restore(deck, 1, ["zelda.srm"])
+    assert manifest.generation == 4 and after.status == "ok"
+    assert deck.read("zelda.srm") == b"zelda v1" and deck.read("metroid.srm") == b"metroid from pc"
+
+
+def test_dir_units_restore_whole_folders(world):
+    deck, pc = world("Deck", unit="dir"), world("PC", unit="dir")
+    deck.write("card1/a.srm", b"a1"), deck.write("card2/b.srm", b"b1"), deck.sync()
+    deck.write("card1/a.srm", b"a2"), deck.write("card1/new.srm", b"new"), deck.write("card2/b.srm", b"b2"), deck.sync()
+    pc.sync()
+    _, manifest = restore(deck, 1, ["card1"])
+    assert manifest.restored_from == 1
+    assert deck.read("card1/a.srm") == b"a1" and not (deck.saves / "card1/new.srm").exists() and deck.read("card2/b.srm") == b"b2"
+    pc.sync()
+    assert pc.read("card1/a.srm") == b"a1" and not (pc.saves / "card1/new.srm").exists()
+
+
+def test_damaged_history_is_reported_not_a_crash(world):
+    from memcard.errors import RemoteCorrupt
+
+    deck, _ = two_versions(world)
+    deck.write("zelda.srm", b"v3"), deck.sync()
+    store = deck.engine().store
+    store.rclone("rcat", store._p("groups", "ra", "history", "1.json"), input='{"format": 1, "group": "ra", "generation": 1, "parent": [0]}')
+    with pytest.raises(RemoteCorrupt):
+        history(deck)
+    store.rclone("rcat", store._p("groups", "ra", "history", "1.json"), input="{not json")
+    with pytest.raises(RemoteCorrupt):
+        history(deck)

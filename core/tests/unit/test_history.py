@@ -128,3 +128,17 @@ def test_restored_from_round_trips_and_is_optional():
     assert Manifest.from_dict(m.to_dict()).restored_from == 1
     plain = Manifest("g", 3, 2, "t", "m", {}, {"a": A}).to_dict()
     assert "restored_from" not in plain and Manifest.from_dict(plain).restored_from is None
+
+
+def test_restore_refuses_what_this_machines_own_guard_would_misread():
+    """Deck syncs only *.srm; another machine also syncs x.cfg. Sharing x.cfg isn't enough for the Deck."""
+    g = group("group", include=["*.srm"])
+    with pytest.raises(MemcardError, match="shares no files"):
+        restore_files({"b.srm": B, "x.cfg": C}, {"a.srm": A, "x.cfg": C}, None, g)
+
+
+def test_restored_units_names_what_changed():
+    from memcard.history import restored_units
+
+    g = group("dir")
+    assert restored_units({"c1/a": A, "c2/b": B}, {"c1/a": B, "c2/b": B}, g) == ["c1"]

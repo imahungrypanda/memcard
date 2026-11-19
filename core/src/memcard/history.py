@@ -26,6 +26,17 @@ from .model import FileEntry, Files
 ADDED, MODIFIED, DELETED = "added", "modified", "deleted"
 
 
+class NothingToRestore(MemcardError):
+    """The chosen saves already match that version."""
+
+    code = "nothing_to_restore"
+
+
+def whole(group: Group) -> bool:
+    """Groups whose saves are one unit: restored whole, with no saves to pick."""
+    return group.single is not None or group.unit == "group"
+
+
 @dataclass(frozen=True)
 class Change:
     path: str
@@ -86,8 +97,7 @@ def restore_files(head: Files, old: Files, units: list[str] | None, group: Group
     Restored entries keep their content, size and mtime, and are stamped as
     written by ``machine_id`` at ``now``: that's when the cloud got them back.
     """
-    whole = group.single is not None or group.unit == "group"
-    if units and whole:
+    if units and whole(group):
         raise ConfigError(
             f"{group.id} is restored as a whole, so it has no separate saves to pick.",
             hint="Leave out --unit.",
@@ -113,12 +123,21 @@ def restore_files(head: Files, old: Files, units: list[str] | None, group: Group
     out = {p: e for p, e in head.items() if group.unit_key(p) not in chosen}
     out.update({p: restored(e) for p, e in old.items() if group.unit_key(p) in chosen})
     if {p: e.sha256 for p, e in out.items()} == {p: e.sha256 for p, e in head.items()}:
-        raise MemcardError("Those saves already match that version, so there's nothing to restore.")
-    if head and not (out.keys() & head.keys()):
-        # Every machine's planner would read this as "the cloud lost every save" (the mass-delete guard)
-        # and ask whether to upload them again, which would undo the restore.
+        raise NothingToRestore("Those saves already match that version, so there's nothing to restore.")
+    # A planner whose snapshot shares no paths with the new HEAD reads it as "the cloud lost every save"
+    # (the mass-delete guard) and offers to upload them again, which would undo the restore. Checked for
+    # every path, and for the paths this machine syncs; other machines' patterns can't be known here.
+    mine_head = {p for p in head if group.wants(p)}
+    mine_out = {p for p in out if group.wants(p)}
+    if (head and not (out.keys() & head.keys())) or (mine_head and not (mine_out & mine_head)):
         raise MemcardError(
             f"That version of {group.id} shares no files with the current one, so Memcard can't restore it safely.",
             hint=f"Copy it out with `memcard export {group.id} DIR --generation N` and put the files back by hand.",
         )
     return out
+
+
+def restored_units(head: Files, out: Files, group: Group) -> list[str]:
+    """The units a restore actually changes."""
+    changed = {p for p in head.keys() | out.keys() if (head.get(p) and head[p].sha256) != (out.get(p) and out[p].sha256)}
+    return sorted({group.unit_key(p) for p in changed})

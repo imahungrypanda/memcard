@@ -299,7 +299,7 @@ memcard trash list|restore
 memcard gc
 memcard export GROUP DIR [--generation N]
 memcard history list GROUP [--limit N] [--unit KEY]       cloud versions, newest first, with what each changed
-memcard history restore GROUP GEN [--unit KEY]... [--resolve …]   put saves back as a new cloud version (history.md)
+memcard history restore GROUP GEN (--unit KEY... | --all) [--resolve …]   put saves back as a new cloud version (history.md)
 memcard timer enable|disable         systemd oneshot timer running `sync --periodic`
 memcard log
 global: --json   exit codes: 0 ok · 2 conflicts pending · 3 offline/unreachable · 4 config · 1 other

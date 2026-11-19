@@ -311,7 +311,8 @@ Nothing is overwritten or deleted without a copy.
   ```
 
 - **Cloud versions:** every sync that uploads something makes a new version of the
-  group in the cloud. `memcard gc` keeps the last 20 per group (`history_versions`).
+  group in the cloud. `memcard gc` prunes them to `history_versions` per group (20 in new
+  configs; older configs say 5).
   List them, and put one game's save back on every machine:
 
   ```bash
@@ -323,9 +324,10 @@ Nothing is overwritten or deleted without a copy.
   A restore first syncs (so nothing unsynced is lost), then saves a new version in which
   that save is copied from version 12, then downloads it here. This machine's current
   copy goes to the trash first, your other machines get it on their next sync, and the
-  version you replaced stays in the list, so you can undo it. Without `--unit`, every save
-  that existed in version 12 goes back. For emulators that sync as one unit (Dolphin,
-  Citra, Cemu, Ryujinx, xemu) that's the only choice.
+  version you replaced stays in the list, so you can undo it. `--all` instead of `--unit`
+  puts back every save that existed in version 12 (newer saves are kept). Emulators that
+  sync as one unit (Dolphin, Citra, Cemu, Ryujinx, xemu) always restore whole and take
+  neither.
 
   To copy any version out as plain files instead:
 

@@ -85,9 +85,11 @@ without copying files by hand, and none of it is reachable in Game Mode. This fe
 9. **`memcard history list --json` says, per version, which saves differ from the current version**,
    so the detail screen needs no second command (§5.4).
 10. **A restore that would look like "the cloud lost every save" is refused.** That's a restore
-    whose *result* shares no file paths with the current HEAD. Every machine's mass-delete guard would read it as a
-    wiped remote and offer to upload the saves again, undoing the restore. `memcard export` remains
-    the way out.
+    whose *result* shares no file paths with the current HEAD. Every machine's mass-delete guard
+    would read it as a wiped remote and offer to upload the saves again, undoing the restore.
+    `memcard export` remains the way out. It's checked across every path, and across the paths this
+    machine syncs. Other machines' include patterns can't be known, so a machine with much narrower
+    patterns can still be asked.
 
 ## 4. What "one game" means for each emulator
 

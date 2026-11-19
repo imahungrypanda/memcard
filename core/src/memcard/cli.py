@@ -563,15 +563,14 @@ def cmd_history_list(ctx: Ctx) -> int:
 
 
 def cmd_history_restore(ctx: Ctx) -> int:
-    from . import triggers
+    from . import history, triggers
     from .engine import no_decisions
 
     a = ctx.args
     group = ctx.cfg.group(a.group)
-    whole = group.single is not None or group.unit == "group"
     if a.unit and a.all:
         raise ConfigError("Pass either --unit or --all, not both.")
-    if not whole and not a.unit and not a.all:
+    if not history.whole(group) and not a.unit and not a.all:
         # One RetroArch group holds every RetroArch game: rolling all of them back must be asked for.
         raise ConfigError(
             f"{group.id} holds separate saves (unit = {group.unit}). Say which to restore.",
@@ -592,17 +591,23 @@ def cmd_history_restore(ctx: Ctx) -> int:
     def game_started() -> str | None:
         return "A game started, so the restore stopped." if triggers.game_running(ctx.cfg, ctx.dirs) else None
 
-    results, manifest = _engine(ctx).restore(group, a.generation, a.unit or None, decide, abort_if=game_started)
+    units = sorted(set(a.unit)) or None
+    results, manifest, restored_units = _engine(ctx).restore(group, a.generation, units, decide, abort_if=game_started)
+    first, last = results[0], results[-1]
     restored = None
-    if manifest:
-        restored = {"group": group.id, "generation": manifest.generation, "restored_from": a.generation, "units": a.unit or None}
     if manifest is None:
-        text = (f"Nothing was restored: {group.id} has a conflict to settle first. "
-                f"Run `memcard sync {group.id}` (or pass --resolve), then restore again.") if results[0].conflicts else "Nothing was restored."
+        if first.conflicts:
+            text = (f"Nothing was restored: {group.id} has a conflict to settle first. "
+                    f"Run `memcard sync {group.id}` (or pass --resolve), then restore again.")
+        else:
+            text = "Nothing was restored: " + (first.error.message if first.error else "the sync before it didn't finish.")
     else:
+        restored = {"group": group.id, "generation": manifest.generation, "restored_from": a.generation, "units": restored_units}
         text = f"Restored {group.id} from version {a.generation} (now version {manifest.generation}). Your other machines get it on their next sync."
+        if last.error:
+            text += f"\nThis machine didn't download it yet: {last.error.message}" + (f" {last.error.hint}" if last.error.hint else "")
     ctx.out({"results": [r.to_dict() for r in results], "restored": restored}, text)
-    codes = [r.error.exit_code for r in results if r.error and r.status == "error"]
+    codes = [r.error.exit_code for r in results if r.error]  # a skipped sync means the restore didn't happen here
     if any(r.conflicts for r in results):
         codes.append(ConflictsPending.exit_code)
     return max(codes, default=0)

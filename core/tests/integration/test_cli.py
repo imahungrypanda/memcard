@@ -459,4 +459,12 @@ def test_history_list_and_restore_over_json(machine, capsys, monkeypatch):
     assert events(capsys)[-1]["error"]["code"] == "game_running"
     monkeypatch.setattr(triggers, "running_flatpaks", lambda: set())
     assert run("--json", "history", "restore", "retroarch", "9", "--all") == 4
+    capsys.readouterr()
+    assert run("--json", "history", "restore", "retroarch", "2", "--all") == 0
+    assert result(events(capsys))["restored"]["units"] == ["fr.srm"], "--all reports what it actually restored"
+    import shutil
+
+    shutil.rmtree(machine)
+    assert run("--json", "history", "restore", "retroarch", "3", "--all") == 1, "a skipped sync restored nothing"
+    assert result(events(capsys))["restored"] is None
     assert run("--json", "history", "list", "retroarch", "--limit", "0") == 4

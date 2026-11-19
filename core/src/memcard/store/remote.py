@@ -170,7 +170,10 @@ class RemoteStore:
                     data = json.loads(path.read_text())
                     if not isinstance(data, dict):
                         raise ValueError("not a JSON object")
-                    out[n] = Manifest.from_dict(data)
+                    m = Manifest.from_dict(data)
+                    if (m.group, m.generation) != (group, n):
+                        raise ValueError(f"holds {m.group} generation {m.generation}")
+                    out[n] = m
                 except (KeyError, TypeError, ValueError) as e:  # JSONDecodeError is a ValueError
                     raise _corrupt(where, str(e)) from e
             return out

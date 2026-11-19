@@ -364,10 +364,10 @@ class Engine:
             return {"group": group.id, "unit": _unit_kind(group), "head": None, "machines": {}, "more": False, "versions": []}
         # A history file newer than HEAD is a commit that never landed (it died, or lost the CAS race).
         gens = [g for g in self.store.history(group.id) if g < head.generation]
-        wanted = gens[-limit:]  # plus HEAD itself below, and one more for the oldest one's diff
-        fetched = self.store.manifests(group.id, gens[-(limit + 1):])
+        older = gens[len(gens) - (limit - 1):] if limit > 1 else []  # shown below HEAD
+        fetched = self.store.manifests(group.id, gens[max(0, len(gens) - limit):])  # those, plus the oldest one's parent
         fetched[head.generation] = head  # HEAD is authoritative for the current generation
-        shown = sorted([*wanted, head.generation], reverse=True)[:limit]
+        shown = sorted([*older, head.generation], reverse=True)
 
         names: dict[str, str] = {}
         for g in sorted(fetched):
@@ -407,7 +407,7 @@ class Engine:
                 "more": len(gens) + 1 > limit, "versions": versions}
 
     def restore(self, group: Group, generation: int, units: list[str] | None, decide: Decider = no_decisions,
-                abort_if: Callable[[], object] | None = None) -> tuple[list[GroupResult], Manifest | None]:
+                abort_if: Callable[[], object] | None = None) -> tuple[list[GroupResult], Manifest | None, list[str] | None]:
         """Commit a new cloud version with ``units`` put back to how ``generation`` had them, then pull it here.
 
         One lock around three steps: sync (local changes are pushed and become
@@ -415,18 +415,29 @@ class Engine:
         only this sync's conflicts), commit the restore, sync again with no
         decisions (a conflict there is left for the user, never auto-resolved
         over the restore). If the first sync doesn't come back clean, nothing
-        is restored. Returns both syncs' results and the committed manifest.
+        is restored.
+
+        Returns both syncs' results, the committed manifest (None if nothing
+        was restored) and the units it changed (None for a whole-group restore).
         """
         label = group.label or group.id
         self.abort_if = abort_if
         with self.lock():
+            # Two cheap reads first, so a bad request fails before any sync or conflict prompt.
+            units = self._restore_units(group, generation, units)
             before = self._sync_locked([group], decide, verb="Syncing before restoring:")[0]
             if before.status != "ok" or before.conflicts:
-                return [before], None
+                return [before], None, None
             self._safe_point()
             for attempt in range(ATTEMPTS):
                 try:
                     manifest = self._commit_restore(group, generation, units)
+                    break
+                except history.NothingToRestore:
+                    if attempt == 0:
+                        raise
+                    # Our commit landed, and another machine committed on top before the read-back.
+                    manifest = self.store.head(group.id)
                     break
                 except RemoteChanged as e:
                     if attempt == ATTEMPTS - 1:
@@ -436,22 +447,36 @@ class Engine:
                              generation=manifest.generation, restored_from=generation)
             try:
                 after = self._sync_locked([group], no_decisions, verb="Downloading the restored")[0]
-            except Cancelled as e:
-                raise Cancelled(
-                    "A game started, so the restore stopped before changing this machine's saves.",
+            except Cancelled as e:  # stopped at the safe point before the download began
+                after = GroupResult(group.id, "error", error=e)
+                self._emit_result(after)
+            if isinstance(after.error, Cancelled):
+                after.error = Cancelled(
+                    f"{after.error.message} This machine's saves weren't changed.",
                     hint="The cloud already has the restored version; this machine gets it on its next sync.",
-                ) from e
-        return [before, after], manifest
+                )
+        return [before, after], manifest, units
 
-    def _commit_restore(self, group: Group, generation: int, units: list[str] | None) -> Manifest:
+    def _restore_units(self, group: Group, generation: int, units: list[str] | None) -> list[str] | None:
+        """Check a restore request against the cloud as it is now, and pin "every unit that differs" to a list,
+        so a retry after another machine's commit never widens what gets restored."""
+        head, old = self._restore_sources(group, generation)
+        files = history.restore_files(head.files, old.files, units, group)
+        return None if history.whole(group) else (units or history.restored_units(head.files, files, group))
+
+    def _restore_sources(self, group: Group, generation: int) -> tuple[Manifest, Manifest]:
         head = self.store.head(group.id)
         if head is None:
             raise MemcardError(f"There's nothing in the cloud for {group.id} yet.")
         if generation == head.generation:
-            raise MemcardError(f"Version {generation} is already the current one, so there's nothing to restore.")
+            raise history.NothingToRestore(f"Version {generation} is already the current one, so there's nothing to restore.")
         old = self.store.manifest_at(group.id, generation) if generation < head.generation else None
         if old is None or (old.group, old.generation) != (group.id, generation):
             raise ConfigError(f"There's no version {generation} of {group.id} in the cloud.", hint="`memcard history list` shows them.")
+        return head, old
+
+    def _commit_restore(self, group: Group, generation: int, units: list[str] | None) -> Manifest:
+        head, old = self._restore_sources(group, generation)
         now = utcnow()
         files = history.restore_files(head.files, old.files, units, group, self.cfg.machine_id, now)
         # Download (and verify) what the restore brings back: proves it's still
@@ -482,7 +507,7 @@ class Engine:
 
 
 def _unit_kind(group: Group) -> str:
-    return "group" if group.single else group.unit
+    return "group" if history.whole(group) else group.unit
 
 
 def _expect(copy: Path | None, expected: FileEntry | None, rel: str) -> None:
