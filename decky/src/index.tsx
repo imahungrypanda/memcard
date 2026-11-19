@@ -26,6 +26,8 @@ import {
   type Settings,
 } from "./backend";
 import { askResolutions } from "./conflicts";
+import { showHistory } from "./history";
+import { blockedReason } from "./historyText";
 import { controller, registerLaunchHooks } from "./launch";
 import { checkForUpdate, checkIfStale, installUpdate, loadInstalledVersion, onUpdateState, startUpdateChecks, updateState } from "./updater";
 import { describe } from "./launchController";
@@ -223,13 +225,25 @@ function Content() {
       <PanelSection title="Save groups">
         {(groups?.groups ?? []).map((g) => (
           <PanelSectionRow key={g.id}>
-            <Field
+            <ButtonItem
+              layout="inline"
               label={g.label || g.id}
               description={
                 (plans[g.id] ? summary(plans[g.id]) + " · " : "") +
                 (g.appids.length ? `${g.appids.length} game(s) mapped` : "manual sync only")
               }
-            />
+              disabled={!groups?.remote}
+              onClick={() =>
+                showHistory(
+                  g,
+                  groups?.machine ?? { id: "", name: "this machine" },
+                  () => blockedReason(controller.isRunning() || controller.isBusy(), g.id in (cachedGroups()?.pending ?? {}), g.label || g.id),
+                  () => refreshGroups(),
+                )
+              }
+            >
+              Versions
+            </ButtonItem>
           </PanelSectionRow>
         ))}
         {groups && groups.groups.length === 0 && (

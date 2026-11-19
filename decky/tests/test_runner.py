@@ -92,6 +92,7 @@ def test_only_allowlisted_subcommands(tmp_path):
         with pytest.raises(ValueError):
             r.command(bad)
     assert "gc" not in ALLOWED and "wrap" not in ALLOWED and "timer" not in ALLOWED
+    assert r.command(["history", "list", "retroarch"])[-3:] == ["history", "list", "retroarch"]
 
 
 def test_cancel_sends_sigterm(tmp_path):

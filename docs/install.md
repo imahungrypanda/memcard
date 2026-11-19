@@ -403,6 +403,13 @@ cloud, with EmuDeck-shaped symlinks. These parts need your hardware:
 - [ ] While a game runs, the panel's Sync now is greyed out with a note.
 - [ ] Reload the plugin mid-game (Decky ⚙ → reload, or reinstall the zip), then: Resume
       doesn't sync, and quitting still shows "Saves synced".
+- [ ] **Cloud versions:** under Save groups, press **Versions** on RetroArch. The list loads, newest first,
+      with dates, machine names ("this machine" for this one) and what changed. The **Show versions that
+      changed** dropdown and the save toggles work with the controller.
+- [ ] Restore one RetroArch save from an older version: the confirm screen says what happens, a toast
+      appears, the save on this machine is the old one, and the other machine gets it on its next sync.
+      `memcard trash list` shows the replaced copy.
+- [ ] While a game runs, Versions still opens, but **Restore** is greyed out with "You can restore after you quit the game".
 - [ ] Find EmuDeck saves → Add maps your shortcuts. Check what would sync and Sync now
       show sensible results.
 

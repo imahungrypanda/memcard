@@ -105,3 +105,52 @@ export interface ExistingRemote {
 }
 
 export type Choice = "local" | "remote" | "both";
+
+// `memcard history list GROUP --json`
+export interface HistorySide {
+  size: number;
+  written_at: string | null;
+  written_by: string | null;
+  machine: string;
+}
+
+export interface HistoryChange {
+  path: string;
+  unit: string;
+  change: "added" | "modified" | "deleted";
+  size: number | null;
+}
+
+export interface HistoryUnitDiff {
+  unit: string;
+  restorable: boolean;
+  files: { path: string; then: HistorySide | null; now: HistorySide | null }[];
+}
+
+export interface HistoryVersion {
+  generation: number;
+  committed_at: string;
+  committed_by: string;
+  machine: string;
+  restored_from: number | null;
+  current: boolean;
+  changes: HistoryChange[] | null; // null: the version before it was cleaned up
+  differs: HistoryUnitDiff[];
+}
+
+export type UnitKind = "group" | "file" | "dir";
+
+export interface HistoryData {
+  group: string;
+  unit: UnitKind;
+  head: number | null;
+  machines: Record<string, string>;
+  more: boolean;
+  versions: HistoryVersion[];
+}
+
+// `memcard history restore … --json`
+export interface RestoreData {
+  results: GroupResult[];
+  restored: { group: string; generation: number; restored_from: number; units: string[] | null } | null;
+}
