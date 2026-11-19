@@ -399,11 +399,11 @@ run it in Desktop Mode's terminal as `python3 ~/homebrew/plugins/Memcard/bin/mem
 - [ ] B3. **Set up Memcard** in Game Mode: the Steam keyboard comes up in text fields, password
       fields are hidden, and **Install rclone** works if it asks.
 - [ ] B4. Enter the URL without `/remote.php/dav/files/<user>/` on purpose. It's caught with a
-      message saying what the URL should look like. Fix it with **Edit the settings**.
+      message saying what the URL should look like. Correct it in the field and press **Next**.
 - [ ] B5. Enter a wrong password on purpose (your login password works for this only if your account
       uses two-factor login; otherwise type anything wrong). You get "Credentials rejected…" with
       **Show details** under it, which opens rclone's raw output on top of setup. **B** returns
-      to setup, not out of it.
+      to setup, not out of it. Then **Edit the settings** to enter the app password.
 - [ ] B6. With the app password, the round trip passes and setup says **Connected**.
 - [ ] B7. The panel's **Updates** section shows **Update to …** with the newest version (if it says
       **Check for updates**, press it: it offers the update, not "Failed to fetch"). Don't press
