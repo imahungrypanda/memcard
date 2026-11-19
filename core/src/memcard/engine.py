@@ -301,10 +301,17 @@ class Engine:
         collectable, so only the new ones are checked.
         """
         known = {e.sha256 for e in parent.files.values()} if parent else set()
-        lost = self.store.missing(set(sources) - known)
-        if lost:
-            log.warning("re-uploading %d object(s) the remote lost before our commit", len(lost))
-            self.store.upload({sha: sources[sha] for sha in lost})
+        # HEAD is already committed, so this runs to the end: a deadline or a
+        # cancel here would leave a lost object that no later sync re-uploads
+        # (it sees L == R and does nothing).
+        deadline, self.rclone.deadline = self.rclone.deadline, None
+        try:
+            lost = self.store.missing(set(sources) - known)
+            if lost:
+                log.warning("re-uploading %d object(s) the remote lost before our commit", len(lost))
+                self.store.upload({sha: sources[sha] for sha in lost})
+        finally:
+            self.rclone.deadline = deadline
 
     def _pull(self, group: Group, actions: list[planner.Action], run_dir: Path, result: GroupResult) -> None:
         pulls = [a for a in actions if a.kind == "pull"]

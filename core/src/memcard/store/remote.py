@@ -215,6 +215,7 @@ class RemoteStore:
         would make live objects look like garbage.
         """
         self.ensure_initialized(create=False)
+        heads_before = self._heads()
         groups_ls = self.rclone.raw("lsf", "--dirs-only", self._p("groups"))
         if groups_ls.returncode != 0 and not Rclone.is_missing(groups_ls):
             self.rclone.check(groups_ls)
@@ -248,9 +249,28 @@ class RemoteStore:
             if datetime.fromisoformat(item["ModTime"].replace("Z", "+00:00")) > cutoff:
                 continue
             doomed.append(item["Path"])
+        # A commit that landed after we read its group's HEAD may reference an
+        # object we're about to delete: an old one that its push found already
+        # uploaded (#2). Re-list every HEAD right before deleting and back off
+        # if any changed. What's left is the gap between this listing and the
+        # delete, which the committing machine's post-commit check covers.
+        if doomed and self._heads() != heads_before:
+            raise RemoteChanged(
+                "Another machine synced while gc was running, so it deleted nothing.",
+                hint="Run `memcard gc` again.",
+            )
         if doomed:
             self.rclone("delete", self._p("objects"), "--files-from", "-", input="\n".join(doomed) + "\n")
         return {"history_pruned": pruned, "objects_deleted": len(doomed)}
+
+    def _heads(self) -> dict[str, tuple[int, str]]:
+        """Every group's HEAD.json with its size and modtime, in one listing: a cheap "did anyone commit?" check."""
+        result = self.rclone.raw("lsjson", "-R", "--files-only", "--max-depth", "2", "--include", "/*/HEAD.json", self._p("groups"))
+        if result.returncode != 0:
+            if Rclone.is_missing(result):
+                return {}
+            self.rclone.check(result)
+        return {item["Path"]: (item["Size"], item["ModTime"]) for item in json.loads(result.stdout or "[]")}
 
 
 def _corrupt(where: str, why: str) -> RemoteCorrupt:

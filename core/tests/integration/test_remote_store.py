@@ -151,3 +151,29 @@ def test_uploads_are_stamped_with_the_upload_time(store, tmp_path):
     store.commit(manifest(1, None))  # references nothing: the object is unreferenced
     assert store.gc(keep=2)["objects_deleted"] == 0
     assert os.stat(p).st_mtime == three_days_ago, "upload must not touch its source"
+
+
+def test_gc_deletes_nothing_if_a_commit_lands_while_it_runs(store, tmp_path, monkeypatch):
+    """#2 from gc's side: a commit after gc read that group's HEAD may reference an object gc thinks is garbage."""
+    from memcard.store import remote as remote_mod
+
+    p = tmp_path / "reverted.srm"
+    p.write_bytes(b"old save, still on the remote")
+    sha = sha256(p)
+    store.upload({sha: p})
+    store.commit(manifest(1, None))  # nothing references it yet
+    monkeypatch.setattr(remote_mod, "GC_GRACE", remote_mod.timedelta(seconds=-60))
+    real_raw = store.rclone.raw
+
+    def another_machine_commits_after_gc_read_heads(*args, **kw):
+        out = real_raw(*args, **kw)
+        if args[0] == "lsjson" and args[-1].endswith("/objects") and store.head("g").generation == 1:
+            store.commit(manifest(2, 1, {"s.srm": FileEntry(sha, 29)}))  # e.g. a push that reverted to it
+        return out
+
+    monkeypatch.setattr(store.rclone, "raw", another_machine_commits_after_gc_read_heads)
+    with pytest.raises(RemoteChanged, match="deleted nothing"):
+        store.gc(keep=5)
+    assert (store.dir / "objects" / object_rel(sha)).exists()
+    monkeypatch.setattr(store.rclone, "raw", real_raw)
+    assert store.gc(keep=5)["objects_deleted"] == 0  # now referenced

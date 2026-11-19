@@ -430,3 +430,30 @@ def test_object_lost_to_gc_before_commit_is_uploaded_again(world, monkeypatch):
     assert deck.engine().store.missing({v1}) == set()
     r = pc.sync()
     assert r.status == "ok" and pc.read("s.srm") == b"v1"
+
+
+def test_lost_object_is_put_back_even_if_the_sync_is_cancelled_after_commit(world, monkeypatch):
+    """Past the commit point, nothing later would ever re-upload it: L == R from then on."""
+    from memcard.errors import Cancelled
+    from memcard.store.remote import object_rel
+
+    deck, pc = world("Deck"), world("PC")
+    deck.write("s.srm", b"v1"), deck.sync()
+    deck.write("s.srm", b"v2"), deck.sync()
+    deck.write("s.srm", b"v1")
+    v1 = engine_mod.scan.sha256(deck.saves / "s.srm")
+    real_commit = RemoteStore.commit
+
+    def gc_then_cancel(self, manifest):
+        self.rclone("deletefile", self._p("objects", object_rel(v1)))
+        real_commit(self, manifest)
+        self.rclone.deadline.cancelled = True  # SIGTERM or the launch budget, right after HEAD lands
+
+    monkeypatch.setattr(RemoteStore, "commit", gc_then_cancel)
+    try:
+        deck.sync()
+    except Cancelled:
+        pass
+    monkeypatch.setattr(RemoteStore, "commit", real_commit)
+    assert deck.engine().store.missing({v1}) == set()
+    assert pc.sync().status == "ok" and pc.read("s.srm") == b"v1"
