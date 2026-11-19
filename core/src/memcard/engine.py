@@ -423,12 +423,17 @@ class Engine:
         label = group.label or group.id
         self.abort_if = abort_if
         with self.lock():
-            # Two cheap reads first, so a bad request fails before any sync or conflict prompt.
-            units = self._restore_units(group, generation, units)
+            # Two cheap reads first, so a request no sync could make valid fails before any sync or conflict prompt.
+            self._check_restore(group, generation, units)
             before = self._sync_locked([group], decide, verb="Syncing before restoring:")[0]
             if before.status != "ok" or before.conflicts:
                 return [before], None, None
             self._safe_point()
+            if units is None and not history.whole(group):
+                # Pin "every save that differs" now that this machine's changes are in the cloud,
+                # so a retry after another machine's commit never widens what gets restored.
+                head, old = self._restore_sources(group, generation)
+                units = history.restored_units(head.files, history.restore_files(head.files, old.files, None, group), group)
             for attempt in range(ATTEMPTS):
                 try:
                     manifest = self._commit_restore(group, generation, units)
@@ -455,14 +460,16 @@ class Engine:
                     f"{after.error.message} This machine's saves weren't changed.",
                     hint="The cloud already has the restored version; this machine gets it on its next sync.",
                 )
-        return [before, after], manifest, units
+        return [before, after], manifest, None if history.whole(group) else units
 
-    def _restore_units(self, group: Group, generation: int, units: list[str] | None) -> list[str] | None:
-        """Check a restore request against the cloud as it is now, and pin "every unit that differs" to a list,
-        so a retry after another machine's commit never widens what gets restored."""
-        head, old = self._restore_sources(group, generation)
-        files = history.restore_files(head.files, old.files, units, group)
-        return None if history.whole(group) else (units or history.restored_units(head.files, files, group))
+    def _check_restore(self, group: Group, generation: int, units: list[str] | None) -> None:
+        head = self.store.head(group.id)
+        if head is None:
+            raise MemcardError(f"There's nothing in the cloud for {group.id} yet.")
+        old = self.store.manifest_at(group.id, generation) if generation <= head.generation else None
+        if old is None or (old.group, old.generation) != (group.id, generation):
+            raise ConfigError(f"There's no version {generation} of {group.id} in the cloud.", hint="`memcard history list` shows them.")
+        history.check_request(old.files, units, group, generation)
 
     def _restore_sources(self, group: Group, generation: int) -> tuple[Manifest, Manifest]:
         head = self.store.head(group.id)

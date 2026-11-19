@@ -254,3 +254,19 @@ def test_damaged_history_is_reported_not_a_crash(world):
     store.rclone("rcat", store._p("groups", "ra", "history", "1.json"), input="{not json")
     with pytest.raises(RemoteCorrupt):
         history(deck)
+
+
+@pytest.mark.parametrize("units", [["zelda.srm"], None])
+def test_an_unsynced_broken_save_can_be_restored(world, units):
+    """The cloud hasn't changed zelda since version 1, but this machine has (unsynced). The sync before
+    the restore pushes it, so restoring version 1 has something to put back, with --unit and with --all."""
+    deck, pc = world("Deck"), world("PC")
+    deck.write("zelda.srm", b"z1"), deck.write("metroid.srm", b"m1"), deck.sync()
+    deck.write("metroid.srm", b"m2"), deck.sync()
+    deck.write("zelda.srm", b"broken, never synced")
+    (before, after), manifest = restore(deck, 1, units)
+    assert before.pushed == ["zelda.srm"] and after.status == "ok"
+    assert deck.read("zelda.srm") == b"z1"
+    assert deck.read("metroid.srm") == (b"m2" if units else b"m1")
+    pc.sync()
+    assert pc.read("zelda.srm") == b"z1"

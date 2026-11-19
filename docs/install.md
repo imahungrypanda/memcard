@@ -326,7 +326,7 @@ Nothing is overwritten or deleted without a copy.
   copy goes to the trash first, your other machines get it on their next sync, and the
   version you replaced stays in the list, so you can undo it. `--all` instead of `--unit`
   puts back every save that existed in version 12 (newer saves are kept). Emulators that
-  sync as one unit (Dolphin, Citra, Cemu, Ryujinx, xemu) always restore whole and take
+  sync as one unit (Dolphin, Citra, Cemu, Ryujinx, xemu) always restore whole and need
   neither.
 
   To copy any version out as plain files instead:

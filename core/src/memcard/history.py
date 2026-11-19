@@ -90,6 +90,24 @@ def compare(version: Files, head: Files, group: Group) -> list[UnitDiff]:
     return [by_unit[k] for k in sorted(by_unit)]
 
 
+def check_request(old: Files, units: list[str] | None, group: Group, generation: int) -> None:
+    """The checks no sync can change: run before the sync that precedes a restore, so a bad request fails fast."""
+    if units and whole(group):
+        raise ConfigError(
+            f"{group.id} is restored as a whole, so it has no separate saves to pick.",
+            hint="Leave out --unit.",
+        )
+    if not old:
+        raise MemcardError(f"That version of {group.id} has no saves in it, so there's nothing to restore.")
+    present = _units(old, group)
+    for u in sorted(set(units or [])):
+        if u not in present:
+            raise ConfigError(
+                f"{group.id} has no save {u!r} in version {generation}.",
+                hint="`memcard history list` shows which saves each version has.",
+            )
+
+
 def restore_files(head: Files, old: Files, units: list[str] | None, group: Group,
                   machine_id: str | None = None, now: str | None = None) -> Files:
     """HEAD with ``units`` put back to how ``old`` had them. ``None`` = every unit that differs.
