@@ -58,7 +58,15 @@ launch options, and `%command%` expansion for shortcuts is unverified. `wrap` st
 - [x] MIT license, public repo, release on every green main (`release.yml`, install from URL)
 - [x] Update notices: plugin checks GitHub releases and installs through Decky (not a custom store; that would replace the official one)
 - [ ] Show error `detail` in the panel, not just the summary
-- [ ] `memcard history`: list/restore earlier cloud versions of a group
+- [ ] `memcard history`: list/restore earlier cloud versions (plan approved 2026-11-18)
+  - Restore = new cloud version built from an old one, per unit (one game for `file` units), so it
+    reaches every machine. Sync first, restore, sync again in one lock. Refused while a game runs or
+    the group has a pending conflict. `restored_from` in the manifest; `history_versions` default 20.
+  - [x] Step 0: clickable mock of the Decky "Cloud versions" flow (artifact), approved; design in `docs/history.md`
+  - [ ] PR 1: after commit, re-upload objects the new HEAD references but the remote lost (closes #2)
+  - [ ] PR 2: core `history.py` (pure diff/restore_files), `RemoteStore.manifests` (one rclone copy),
+        `Engine.history`/`restore`, `memcard history [restore]` CLI, tests on local + webdav, docs
+  - [ ] PR 3: decky Cloud versions modal (`historyText.ts` pure + tests, `history.tsx`, allowlist)
 
 ## Phase 3 — memcard-gui
 - [ ] Pick GTK4 vs Qt; Flatpak manifest with rsync + rclone bundled

@@ -2,6 +2,8 @@
 
 Status: **approved 2026-10-17** with the recommended answers to D1–D4. memcard-core is built; §8 lists where the build differs from this proposal.
 
+Follow-up designs: [cloud versions / `memcard history`](history.md) (approved 2026-11-18).
+
 Covers the three things the build prompt asks for first: repo layout, state/manifest
 format, and core module boundaries. It also records the decisions that fall out of
 them, and the ones that need your call (§6).
@@ -124,7 +126,7 @@ the broader group excludes it automatically. Edited through `tomlkit` so the GUI
 <remote>:<folder>/
   memcard-remote.json                 {"format": 1} — guards against pointing at the wrong folder
   groups/<group-id>/HEAD.json         current manifest = the commit point
-  groups/<group-id>/history/<gen>.json  last N manifests (remote-side versioning)
+  groups/<group-id>/history/<gen>.json  last N manifests (remote-side versioning; browsed and restored by `memcard history`, see history.md)
   objects/<aa>/<sha256>               file contents, immutable, write-once
 ```
 
