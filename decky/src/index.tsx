@@ -95,7 +95,12 @@ function Content() {
   };
 
   useEffect(() => {
-    const off = onGroups(setGroups);
+    const off = onGroups((g) => {
+      setGroups(g);
+      // Setup's Done refreshes the groups; a mapping means a config now exists. The panel can
+      // stay mounted under the setup modal, so it wouldn't re-read `configured` on its own.
+      if (g) setConfigured(true);
+    });
     const offRunning = controller.onChange(() => {
       setPlaying(controller.isRunning());
       setLaunchBusy(controller.isBusy());

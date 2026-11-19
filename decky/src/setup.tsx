@@ -107,7 +107,9 @@ function SetupModal({ configured, closeModal }: { configured: boolean; closeModa
             style={{ marginTop: 10 }}
             onClick={async () => {
               const ok = await call(() => memcard(["init", "--name", text.trim() || "Steam Deck"]));
-              if (ok) go({ kind: "choose" });
+              if (!ok) return;
+              refreshGroups(); // the config exists now: the panel behind leaves "Set up Memcard" even if setup is abandoned
+              go({ kind: "choose" });
             }}
           >
             Next
