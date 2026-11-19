@@ -108,7 +108,7 @@ def check_request(old: Files, units: list[str] | None, group: Group, generation:
     for u in sorted(set(units or [])):
         if u not in present:
             raise ConfigError(
-                f"{group.id} has no save {u!r} in {version}, so there's nothing to restore.",
+                f"{group.id} has no save {u!r} in {version}.",
                 hint="`memcard history list` shows which saves each version has.",
             )
 
