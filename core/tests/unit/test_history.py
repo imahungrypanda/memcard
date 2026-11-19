@@ -113,9 +113,10 @@ def test_restore_refuses_unknown_absent_and_noop_requests():
     g = group()
     head = {"zelda.srm": B, "chrono.srm": C}
     old = {"zelda.srm": A, "metroid.srm": A}
-    with pytest.raises(ConfigError, match="wasn't saved yet"):
+    # chrono exists now but not then: restoring it would delete it, so it's refused like an unknown save
+    with pytest.raises(ConfigError, match="no save 'chrono.srm' in that version"):
         restore_files(head, old, ["chrono.srm"], g)
-    with pytest.raises(ConfigError, match="no save 'nope.srm'"):
+    with pytest.raises(ConfigError, match="no save 'nope.srm' in that version"):
         restore_files(head, old, ["nope.srm"], g)
     with pytest.raises(MemcardError, match="already match"):
         restore_files({"zelda.srm": A}, {"zelda.srm": A}, None, g)

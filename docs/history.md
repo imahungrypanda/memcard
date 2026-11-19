@@ -49,8 +49,8 @@ without copying files by hand, and none of it is reachable in Game Mode. This fe
      explicitly. One RetroArch group holds every RetroArch game, so rolling all of them back is never
      the default. `--all` restores every unit that existed in that version; saves added since are kept.
    - **`group` groups:** always restore whole, and take no `--unit`.
-   - **Units that didn't exist then are refused** ("wasn't saved yet then"). Restore is not a back
-     door for deleting saves.
+   - **Units that didn't exist then are refused** ("has no save … in version N"). Restore is not a
+     back door for deleting saves.
    - **Files added later inside a restored unit are removed**: a `dir` unit's folder or a `group`
      unit's whole tree goes back exactly as it was. The confirm screen says so, and those files stay
      in the trash and in history.
@@ -117,7 +117,8 @@ events, `pending.json`, and skipped and error handling.
 4. `history.restore_files(head.files, old.files, units, group, machine, now)`. Start from HEAD. For
    every path in the chosen units, across all machines' paths, take the old entry (re-stamped), or
    drop the path if the old version lacks it.
-   - Refuses unknown or absent units, nothing to change, and §3.10.
+   - Refuses what `check_request` refuses (units missing from that version, `--unit` on a whole group,
+     an empty version), nothing to change, and §3.10.
 5. `store.fetch()` only the objects the restore brings back. This proves they exist and are intact,
    and leaves them in the local cache for the pull.
 6. Commit `Manifest(generation=head+1, parent=head, restored_from=gen)` through the usual
@@ -158,6 +159,8 @@ No IO and no clock, like `planner.py`:
 - `compare(version, head, group) -> list[UnitDiff]`: per unit, the files whose content differs from
   HEAD, with their "then" and "now" entries. `restorable` is true when the unit exists in that version.
 - `restore_files(head, old, units, group, machine_id, now)`: §5.1 step 4.
+- `check_request(old, units, group, generation)`: the checks that don't depend on HEAD. The engine
+  runs them before the first sync so a bad request fails fast, and `restore_files` runs them again.
 
 ### 5.4 CLI
 
