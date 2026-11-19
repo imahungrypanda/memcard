@@ -355,6 +355,8 @@ Nextcloud's web UI. That's what lets every sync land all at once or not at all. 
 | `Every save in this group is missing on this machine` | Memcard refused to propagate a mass delete, usually from an unmounted card. Choose **keep remote** to restore. |
 
 Add `-v` to any command to include raw rclone output when reporting a problem.
+In the Decky panel, an error with raw tool output has a **Show details** button under it.
+Toasts stay short: open the panel's **Show log** for theirs.
 
 **Uninstall:** remove the launch-option prefixes, run `memcard timer disable`, then
 delete `~/.local/bin/memcard`, `~/.config/memcard`, `~/.local/state/memcard`,
@@ -418,6 +420,9 @@ cloud, with EmuDeck-shaped symlinks. These parts need your hardware:
 - [ ] For Dolphin (restored whole), a long file list on the version screen scrolls with the D-pad.
 - [ ] Change a save on both machines, then (without syncing this machine in between) restore that group from Versions:
       the conflict prompt appears on top of Cloud versions, and after choosing, the restore goes ahead.
+- [ ] **Show details:** turn Wi-Fi off and press **Check what would sync**. The error appears in the
+      panel with **Show details** under it; that opens rclone's raw output, and the D-pad moves down it
+      line by line until the end. **Show log** scrolls the same way. **B** closes it.
 - [ ] Find EmuDeck saves → Add maps your shortcuts. Check what would sync and Sync now
       show sensible results.
 

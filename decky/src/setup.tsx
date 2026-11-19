@@ -1,7 +1,9 @@
 import { openFilePicker, type FileSelectionType } from "@decky/api";
 import { DialogButton, Focusable, ModalRoot, showModal, Spinner, TextField } from "@decky/ui";
 import { useEffect, useState } from "react";
-import { errorText, memcard, readTokenFile, refreshGroups } from "./backend";
+import { memcard, readTokenFile, refreshGroups } from "./backend";
+import { errorText } from "./errorText";
+import { DetailsButton } from "./textView";
 import type { ExistingRemote, MemcardError, Provider } from "./types";
 
 // Guided setup, one thing at a time. Every step is a `memcard setup …` call, so
@@ -31,6 +33,7 @@ function ErrorBox({ error, onInstallRclone }: { error: MemcardError | string | n
   return (
     <div style={{ margin: "8px 0", padding: 8, borderRadius: 4, background: "rgba(255,80,80,0.15)" }}>
       ✗ {text}
+      {typeof error !== "string" && <DetailsButton error={error} />}
       {missingRclone && onInstallRclone && (
         <DialogButton style={{ marginTop: 8 }} onClick={onInstallRclone}>
           Install rclone

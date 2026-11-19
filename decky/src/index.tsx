@@ -3,7 +3,6 @@ import {
   ButtonItem,
   ConfirmModal,
   Field,
-  ModalRoot,
   PanelSection,
   PanelSectionRow,
   showModal,
@@ -17,7 +16,6 @@ import {
   cachedGroups,
   currentSettings,
   environment,
-  errorText,
   loadSettings,
   memcard,
   onGroups,
@@ -26,12 +24,14 @@ import {
   type Settings,
 } from "./backend";
 import { askResolutions } from "./conflicts";
+import { errorDetail, errorText } from "./errorText";
 import { isRestoring, showHistory } from "./history";
 import { blockedReason } from "./historyText";
 import { controller, registerLaunchHooks } from "./launch";
 import { checkForUpdate, checkIfStale, installUpdate, loadInstalledVersion, onUpdateState, startUpdateChecks, updateState } from "./updater";
 import { describe } from "./launchController";
 import { installRclone, showSetup } from "./setup";
+import { DetailsButton, showText } from "./textView";
 import type { GroupPlan, GroupsData, MemcardError, SyncData } from "./types";
 
 function toast(body: string, title = "Memcard") {
@@ -44,15 +44,6 @@ function summary(plan: GroupPlan | undefined): string {
   const s = plan.summary;
   const parts = [s.push && `${s.push} to upload`, s.pull && `${s.pull} to download`, s.conflict && `${s.conflict} conflict(s)`].filter(Boolean);
   return parts.length ? parts.join(", ") : "✓ up to date";
-}
-
-function showText(title: string, text: string) {
-  showModal(
-    <ModalRoot bAllowFullSize>
-      <div style={{ fontSize: "1.2em", fontWeight: "bold", marginBottom: 8 }}>{title}</div>
-      <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.75em", maxHeight: 400, overflowY: "auto" }}>{text}</pre>
-    </ModalRoot>,
-  );
 }
 
 /** Sync, then ask about any conflicts and apply the answers. Used by "Sync now" and "Resolve conflicts". */
@@ -202,6 +193,11 @@ function Content() {
             <Field description={`✗ ${errorText(error)}`} />
           </PanelSectionRow>
         )}
+        {error && errorDetail(error) && (
+          <PanelSectionRow>
+            <DetailsButton error={error} panel />
+          </PanelSectionRow>
+        )}
       </PanelSection>
 
       <PanelSection title="Automatic">
@@ -261,6 +257,8 @@ function Content() {
                   const r = await memcard<GroupPlan[]>(["status"]);
                   if (r.error) return setError(r.error);
                   setPlans(Object.fromEntries((r.result ?? []).map((p) => [p.group, p])));
+                  const failed = r.result?.find((p) => p.error);
+                  if (failed?.error) setError(failed.error);
                 })
               }
             >
