@@ -372,7 +372,8 @@ cloud, with EmuDeck-shaped symlinks. These parts need your hardware:
 
 - [ ] `python3 --version` on the Deck and Bazzite is 3.11+.
 - [ ] Setup against your real Nextcloud: the URL check, the round trip, and the
-      401 message if you deliberately paste your login password.
+      401 message if you deliberately paste your login password. In the plugin, **Show details**
+      under that message opens rclone's output on top of setup, and **B** returns to setup.
 - [ ] `memcard detect` on the real `/run/media/deck/FATTY/Emulation` finds the
       emulators you use, and maps your Steam shortcuts to them.
 - [ ] Pull on the Deck writes **through** EmuDeck's symlinks. After a sync, this should
@@ -421,8 +422,8 @@ cloud, with EmuDeck-shaped symlinks. These parts need your hardware:
 - [ ] Change a save on both machines, then (without syncing this machine in between) restore that group from Versions:
       the conflict prompt appears on top of Cloud versions, and after choosing, the restore goes ahead.
 - [ ] **Show details:** turn Wi-Fi off and press **Check what would sync**. The error appears in the
-      panel with **Show details** under it; that opens rclone's raw output, and the D-pad moves down it
-      line by line until the end. **Show log** scrolls the same way. **B** closes it.
+      panel with **Show details** under it, which opens rclone's raw output. **B** closes it.
+- [ ] **Show log** opens the log, and the D-pad moves down it line by line to the end.
 - [ ] Find EmuDeck saves → Add maps your shortcuts. Check what would sync and Sync now
       show sensible results.
 

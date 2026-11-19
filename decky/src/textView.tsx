@@ -22,7 +22,7 @@ export function showText(title: string, text: string, lead?: string): void {
   );
 }
 
-export function showErrorDetails(e: ErrorLike): void {
+function showErrorDetails(e: ErrorLike): void {
   showText("Error details", errorDetail(e) ?? "", `✗ ${errorText(e)}`);
 }
 

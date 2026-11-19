@@ -257,10 +257,11 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
         {restorable.map((d) =>
           data.unit === "group" ? (
             d.files.map((f) => (
-              <div key={f.path} style={{ padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,.08)" }}>
+              // A focus stop per row: the D-pad scrolls by moving focus, not over plain divs.
+              <Focusable key={f.path} onActivate={() => {}} style={{ padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,.08)" }}>
                 <div style={{ fontWeight: "bold" }}>{name(f.path)}</div>
                 <div style={{ fontSize: "0.8em", opacity: 0.75 }}>{thenNow(f.then, f.now, me, data.machines)}</div>
-              </div>
+              </Focusable>
             ))
           ) : (
             <ToggleField

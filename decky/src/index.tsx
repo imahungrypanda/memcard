@@ -24,7 +24,7 @@ import {
   type Settings,
 } from "./backend";
 import { askResolutions } from "./conflicts";
-import { errorDetail, errorText } from "./errorText";
+import { errorDetail, errorText, statusError } from "./errorText";
 import { isRestoring, showHistory } from "./history";
 import { blockedReason } from "./historyText";
 import { controller, registerLaunchHooks } from "./launch";
@@ -257,8 +257,8 @@ function Content() {
                   const r = await memcard<GroupPlan[]>(["status"]);
                   if (r.error) return setError(r.error);
                   setPlans(Object.fromEntries((r.result ?? []).map((p) => [p.group, p])));
-                  const failed = r.result?.find((p) => p.error);
-                  if (failed?.error) setError(failed.error);
+                  const failed = statusError(r.result ?? []);
+                  if (failed) setError(failed);
                 })
               }
             >

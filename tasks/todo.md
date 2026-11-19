@@ -57,7 +57,7 @@ launch options, and `%command%` expansion for shortcuts is unverified. `wrap` st
 ## Next
 - [x] MIT license, public repo, release on every green main (`release.yml`, install from URL)
 - [x] Update notices: plugin checks GitHub releases and installs through Decky (not a custom store; that would replace the official one)
-- [ ] Show error `detail` in the panel, not just the summary
+- [x] Show error `detail` in the panel, not just the summary (#21)
   - Pure `errorText.ts` (`errorText` moved from backend.ts, `errorDetail`, `textLines`) + node tests
   - One text viewer (`textView.tsx`): each line a focus stop so the D-pad scrolls it; "Show log" uses it too
   - "Show details" under errors in the panel (incl. a failed "Check what would sync" group), setup and
