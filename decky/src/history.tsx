@@ -27,11 +27,14 @@ import type { GroupInfo, HistoryData, HistoryVersion, MemcardError, RestoreData 
 // All wording lives in historyText.ts; all logic in `memcard history`.
 
 // Same as the conflict prompt: let two-line buttons wrap instead of overflowing.
+// flexShrink 0: the list is a height-capped flex column, so without it rows shrink to fit
+// (clipping their second line) instead of the list scrolling.
 const ROW = {
   width: "100%",
   minWidth: 0,
   height: "auto",
   minHeight: 0,
+  flexShrink: 0,
   lineHeight: 1.3,
   whiteSpace: "normal",
   textAlign: "left",
@@ -180,7 +183,7 @@ function HistoryModal({ group, me, blocked, onChanged, closeModal }: Props) {
         {!loading && data && !shown.length && (
           <div style={{ opacity: 0.75 }}>{filter ? "None of the recent versions changed that save." : "Nothing in the cloud for this group yet."}</div>
         )}
-        <Focusable style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 360, overflowY: "auto" }} flow-children="vertical">
+        <Focusable style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 360, overflowY: "auto" }} flow-children="vertical">
           {data &&
             shown.map((v) => (
               <DialogButton key={v.generation} style={ROW} onClick={() => open(v)}>
