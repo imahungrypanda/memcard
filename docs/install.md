@@ -422,8 +422,8 @@ run it in Desktop Mode's terminal as `python3 ~/homebrew/plugins/Memcard/bin/mem
 - [ ] C4. **Sync now** ends with a toast like "12 save files uploaded". Check what would sync then
       says up to date.
 - [ ] C5. **Cloud versions** opens a pop-up listing every group with how many games are mapped and
-      what the last check found for it. A list longer than the box scrolls with the D-pad, rows never
-      overlap, and **B** closes it.
+      what the last check found for it. Every row shows both lines in full; if there are more groups
+      than fit, the list scrolls with the D-pad. **B** closes it.
 - [ ] C6. Turn Wi-Fi off and press **Check what would sync**. The error appears in the panel with
       **Show details** under it, which opens rclone's raw output, and **B** closes it. Turn Wi-Fi
       back on.
@@ -477,17 +477,17 @@ run it in Desktop Mode's terminal as `python3 ~/homebrew/plugins/Memcard/bin/mem
       scroll for this check (save and quit a game a couple more times if it doesn't): every row
       still shows both lines in full and the list scrolls with the D-pad. The **Show
       versions that changed** dropdown and the save toggles work with the controller.
-- [ ] G2. **B** goes back one screen at a time (confirm → version → list → closed), never straight out.
+- [ ] G2. **B** goes back one screen at a time (confirm → version → list → Save groups → closed), never straight out.
 - [ ] G3. Restore one RetroArch save from an older version: the confirm screen says what happens, a
       toast appears, the save on this machine is the old one, and Bazzite gets it on its next sync.
       `memcard trash list` shows the replaced copy.
 - [ ] G4. Press **B** on the "Restoring…" screen: the restore still finishes and its toast appears,
-      and opening Versions again meanwhile shows Restore greyed out until it's done.
-- [ ] G5. While a game runs, Versions still opens, but **Restore** is greyed out with "You can
+      and opening **Cloud versions** again meanwhile shows Restore greyed out until it's done.
+- [ ] G5. While a game runs, **Cloud versions** still opens, but **Restore** is greyed out with "You can
       restore after you quit the game".
 - [ ] G6. If you use Dolphin (restored whole): a long file list on the version screen scrolls with
       the D-pad.
 - [ ] G7. A restore that meets a conflict. On the Deck, turn off **Sync around games**, then play a
       game, save in-game and quit. On Bazzite, play the same game, save in-game and quit. Back on the
-      Deck, turn **Sync around games** on again and restore that group from Versions: the conflict
+      Deck, turn **Sync around games** on again and restore that group from **Cloud versions**: the conflict
       prompt appears on top of Cloud versions, and after choosing, the restore goes ahead.

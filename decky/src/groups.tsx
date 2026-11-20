@@ -10,18 +10,21 @@ import type { GroupInfo, GroupPlan } from "./types";
 interface Props {
   groups: GroupInfo[];
   plans: Record<string, GroupPlan>;
+  connected: boolean;
   open: (group: GroupInfo) => void;
   closeModal?: () => void;
 }
 
-function GroupsModal({ groups, plans, open, closeModal }: Props) {
+function GroupsModal({ groups, plans, connected, open, closeModal }: Props) {
   return (
     <ModalRoot onCancel={closeModal} bAllowFullSize>
       <div style={{ fontSize: "1.3em", fontWeight: "bold", marginBottom: 4 }}>Save groups</div>
-      <div style={{ marginBottom: 10, opacity: 0.75 }}>Pick a group to see its cloud versions and restore older saves.</div>
+      <div style={{ marginBottom: 10, opacity: 0.75 }}>
+        {connected ? "Pick a group to see its cloud versions and restore older saves." : "Connect cloud storage to see older saves."}
+      </div>
       <Focusable style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 360, overflowY: "auto" }} flow-children="vertical">
         {groups.map((g) => (
-          <DialogButton key={g.id} style={ROW} onClick={() => open(g)}>
+          <DialogButton key={g.id} style={ROW} disabled={!connected} onClick={() => open(g)}>
             <div style={{ fontWeight: "bold" }}>{g.label || g.id}</div>
             <div style={{ fontSize: "0.8em", opacity: 0.8 }}>{groupLine(g, plans[g.id])}</div>
           </DialogButton>
@@ -34,6 +37,6 @@ function GroupsModal({ groups, plans, open, closeModal }: Props) {
   );
 }
 
-export function showGroups(groups: GroupInfo[], plans: Record<string, GroupPlan>, open: (group: GroupInfo) => void): void {
-  showModal(<GroupsModal groups={groups} plans={plans} open={open} />);
+export function showGroups(groups: GroupInfo[], plans: Record<string, GroupPlan>, connected: boolean, open: (group: GroupInfo) => void): void {
+  showModal(<GroupsModal groups={groups} plans={plans} connected={connected} open={open} />);
 }

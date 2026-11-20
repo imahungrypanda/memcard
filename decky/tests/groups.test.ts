@@ -25,15 +25,29 @@ test("groupLine: mapped games, with the check's result in front once there is on
 });
 
 test("groupsSummary: a count and a hint before a check", () => {
-  assert.equal(groupsSummary([group("a")], {}), "1 group. Pick one to see and restore its older saves.");
-  assert.equal(groupsSummary([group("a"), group("b")], {}), "2 groups. Pick one to see and restore its older saves.");
+  assert.equal(groupsSummary([group("a")], {}, true), "1 group. Pick one to see and restore its older saves.");
+  assert.equal(groupsSummary([group("a"), group("b")], {}, true), "2 groups. Pick one to see and restore its older saves.");
+});
+
+test("groupsSummary: without cloud storage, says to connect it", () => {
+  assert.equal(groupsSummary([group("a"), group("b")], { a: plan("a") }, false), "2 groups. Connect cloud storage to see their older saves.");
 });
 
 test("groupsSummary: totals across checked groups, failures counted apart", () => {
   const groups = [group("a"), group("b"), group("c")];
-  assert.equal(groupsSummary(groups, { a: plan("a"), b: plan("b") }), "3 groups · ✓ up to date");
+  assert.equal(groupsSummary(groups, { a: plan("a"), b: plan("b"), c: plan("c") }, true), "3 groups · ✓ up to date");
   assert.equal(
-    groupsSummary(groups, { a: plan("a", 2), b: plan("b", 1, 0, 1), c: plan("c", 5, 0, 0, "offline") }),
+    groupsSummary(groups, { a: plan("a", 2), b: plan("b", 1, 0, 1), c: plan("c", 5, 0, 0, "offline") }, true),
     "3 groups · 3 to upload, 1 conflict(s), 1 couldn't be checked",
   );
+});
+
+test("groupsSummary: a group added since the check is never called up to date", () => {
+  const groups = [group("a"), group("b"), group("new")];
+  assert.equal(groupsSummary(groups, { a: plan("a"), b: plan("b") }, true), "3 groups · 1 not checked yet");
+  assert.equal(groupsSummary(groups, { a: plan("a", 0, 2), b: plan("b") }, true), "3 groups · 2 to download, 1 not checked yet");
+});
+
+test("groupLine: a failed check shows its error", () => {
+  assert.equal(groupLine(group("pcsx2"), plan("pcsx2", 0, 0, 0, "offline")), "✗ offline · 1 game(s) mapped");
 });

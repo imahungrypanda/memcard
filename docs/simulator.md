@@ -164,7 +164,7 @@ scripts/sim-decky.sh         build the page, start the server, open the browser
 
 Each one maps to a bug we've had or a line in `install.md` §8:
 
-1. **Restore one save:** Versions → a version → one toggle → Restore. The confirm screen names the
+1. **Restore one save:** Cloud versions → a group → a version → one toggle → Restore. The confirm screen names the
    save and the date. The toast says Restored. Afterwards:
    - the save file in this machine's home has the old bytes
    - `trash list` has the replaced copy
@@ -173,7 +173,7 @@ Each one maps to a bug we've had or a line in `install.md` §8:
    cloud has it and this machine gets it on its next sync, never "Restored". (#18)
 3. **Restore refused:** the version shares no files with HEAD. The panel shows the refusal and
    refreshes. (#18)
-4. **Restore during a game:** Play a mapped game, then open Versions. Browsing works, and Restore is
+4. **Restore during a game:** Play a mapped game, then open Cloud versions. Browsing works, and Restore is
    greyed out with the right note.
 5. **Conflict during restore:** the other machine changes the save without syncing, this machine
    changes it too, then restore. The conflict prompt opens over Cloud versions, and after a choice

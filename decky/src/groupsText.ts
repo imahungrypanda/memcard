@@ -18,17 +18,20 @@ export function groupLine(group: GroupInfo, plan: GroupPlan | undefined): string
 }
 
 /** The panel button's description: how many groups, and what a check found across all of them. */
-export function groupsSummary(groups: GroupInfo[], plans: Record<string, GroupPlan>): string {
+export function groupsSummary(groups: GroupInfo[], plans: Record<string, GroupPlan>, connected: boolean): string {
   const count = groups.length === 1 ? "1 group" : `${groups.length} groups`;
+  if (!connected) return `${count}. Connect cloud storage to see their older saves.`;
   const checked = groups.map((g) => plans[g.id]).filter((p): p is GroupPlan => !!p);
   if (!checked.length) return `${count}. Pick one to see and restore its older saves.`;
   const sum = (k: "push" | "pull" | "conflict") => checked.reduce((n, p) => n + (p.error ? 0 : p.summary[k]), 0);
   const failed = checked.filter((p) => p.error).length;
+  const unchecked = groups.length - checked.length; // added since the last check
   const parts = [
     sum("push") && `${sum("push")} to upload`,
     sum("pull") && `${sum("pull")} to download`,
     sum("conflict") && `${sum("conflict")} conflict(s)`,
     failed && `${failed} couldn't be checked`,
+    unchecked && `${unchecked} not checked yet`,
   ].filter(Boolean);
   return `${count} · ${parts.length ? parts.join(", ") : "✓ up to date"}`;
 }

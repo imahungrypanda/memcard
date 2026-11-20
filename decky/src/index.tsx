@@ -10,7 +10,7 @@ import {
   staticClasses,
   ToggleField,
 } from "@decky/ui";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FaSdCard } from "react-icons/fa";
 import {
   cachedGroups,
@@ -77,6 +77,8 @@ function Content() {
   const [settings, setSettings] = useState<Settings>(currentSettings());
   const [plans, setPlans] = useState<Record<string, GroupPlan>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const busyRef = useRef(busy); // read live by Cloud versions, which outlives this render
+  busyRef.current = busy;
   const [error, setError] = useState<MemcardError | null>(null);
   const [playing, setPlaying] = useState(controller.isRunning());
   const [upd, setUpd] = useState(updateState());
@@ -222,14 +224,13 @@ function Content() {
           <PanelSectionRow>
             <ButtonItem
               layout="below"
-              description={groupsSummary(groups.groups, plans)}
-              disabled={!groups.remote}
+              description={groupsSummary(groups.groups, plans, !!groups.remote)}
               onClick={() =>
-                showGroups(groups.groups, plans, (g) =>
+                showGroups(groups.groups, plans, !!groups.remote, (g) =>
                   showHistory(
                     g,
                     groups.machine,
-                    () => blockedReason(controller.isRunning(), controller.isBusy() || !!busy || isRestoring(), g.id in (cachedGroups()?.pending ?? {}), g.label || g.id),
+                    () => blockedReason(controller.isRunning(), controller.isBusy() || !!busyRef.current || isRestoring(), g.id in (cachedGroups()?.pending ?? {}), g.label || g.id),
                     () => refreshGroups(),
                   ),
                 )
