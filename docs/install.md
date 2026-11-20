@@ -471,8 +471,9 @@ run it in Desktop Mode's terminal as `python3 ~/homebrew/plugins/Memcard/bin/mem
 ### G. Deck: Cloud versions
 
 - [ ] G1. Under Save groups, press **Versions** on RetroArch. The list loads, newest first, with
-      dates, machine names ("this machine" for this one) and what changed. With more versions than
-      fit, every row still shows both lines in full and the list scrolls with the D-pad. The **Show
+      dates, machine names ("this machine" for this one) and what changed. The list has to
+      scroll for this check (save and quit a game a couple more times if it doesn't): every row
+      still shows both lines in full and the list scrolls with the D-pad. The **Show
       versions that changed** dropdown and the save toggles work with the controller.
 - [ ] G2. **B** goes back one screen at a time (confirm → version → list → closed), never straight out.
 - [ ] G3. Restore one RetroArch save from an older version: the confirm screen says what happens, a
