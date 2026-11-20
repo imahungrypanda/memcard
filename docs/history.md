@@ -80,8 +80,10 @@ without copying files by hand, and none of it is reachable in Game Mode. This fe
    - Restored file entries keep their hash, size and mtime, but are stamped `written_by` the restoring
      machine at the restore time. That's when the cloud got them back, and what a later conflict
      prompt should say.
-8. **The entry point is each Save groups row** in the Decky panel ("Versions ›"). There's no
-   separate Tools button with a group picker.
+8. **The entry point is a Cloud versions button** under Save groups in the Decky panel. It opens a
+   pop-up of groups, and picking one opens its versions. (As built this started as a row per group
+   with a Versions button; it moved to the pop-up because the inline button overflowed the panel
+   and a long list of groups pushed Tools out of reach.)
 9. **`memcard history list --json` says, per version, which saves differ from the current version**,
    so the detail screen needs no second command (§5.4).
 10. **A restore that would look like "the cloud lost every save" is refused.** That's a restore
@@ -253,8 +255,8 @@ Two halves:
 The mock linked at the top shows this flow. Wording follows the plugin's rules: say "this machine" and
 "the cloud", never "Deck", and every button says what it does.
 
-1. **Panel.** Each Save groups row opens that group's versions ("Versions ›"). The row doesn't show a
-   version count: `groups` is offline, and the panel shouldn't hit the network just to draw itself.
+1. **Panel.** **Cloud versions** opens a pop-up of save groups, and picking one opens that group's
+   versions on top (B comes back to the groups). Neither shows a version count: `groups` is offline, and the panel shouldn't hit the network just to draw itself.
 2. **Version list** (`history list GROUP --json`). Newest first. Each row shows the date, the machine
    ("this machine" when the id is its own), and the saves it changed ("A Link to the Past changed").
    The current version has a **Current** pill, and restores have a **Restore** pill plus

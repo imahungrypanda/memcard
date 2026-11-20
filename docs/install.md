@@ -313,7 +313,7 @@ Nothing is overwritten or deleted without a copy.
 - **Cloud versions:** every sync that uploads something makes a new version of the
   group in the cloud. `memcard gc` prunes them to `history_versions` per group (20 in new
   configs; older configs say 5).
-  On the Deck, open the Memcard panel and press **Versions** next to a save group. In a
+  On the Deck, open the Memcard panel, press **Cloud versions** and pick a save group. In a
   terminal, list them and put one game's save back on every machine:
 
   ```bash
@@ -416,12 +416,14 @@ run it in Desktop Mode's terminal as `python3 ~/homebrew/plugins/Memcard/bin/mem
 - [ ] C1. In Desktop Mode, save the output of `ls -l /run/media/deck/FATTY/Emulation/saves/*/`
       to a file. E5 compares against it.
 - [ ] C2. **Find EmuDeck saves** lists the emulators you use from `/run/media/deck/FATTY/Emulation`.
-      Press **Add**: each Save groups row says how many games are mapped.
-- [ ] C3. **Check what would sync** shows sensible counts (everything to upload on the first machine).
+      Press **Add**: the **Cloud versions** button under Save groups counts the groups.
+- [ ] C3. **Check what would sync** shows sensible totals under **Cloud versions** (everything to
+      upload on the first machine).
 - [ ] C4. **Sync now** ends with a toast like "12 save files uploaded". Check what would sync then
       says up to date.
-- [ ] C5. Each Save groups row fits the panel: name and description on the left, a **Versions**
-      button on the right, nothing cut off.
+- [ ] C5. **Cloud versions** opens a pop-up listing every group with how many games are mapped and
+      what the last check found for it. Every row shows both lines in full; if there are more groups
+      than fit, the list scrolls with the D-pad. **B** closes it.
 - [ ] C6. Turn Wi-Fi off and press **Check what would sync**. The error appears in the panel with
       **Show details** under it, which opens rclone's raw output, and **B** closes it. Turn Wi-Fi
       back on.
@@ -470,22 +472,22 @@ run it in Desktop Mode's terminal as `python3 ~/homebrew/plugins/Memcard/bin/mem
 
 ### G. Deck: Cloud versions
 
-- [ ] G1. Under Save groups, press **Versions** on RetroArch. The list loads, newest first, with
+- [ ] G1. Press **Cloud versions** and pick RetroArch. The list loads, newest first, with
       dates, machine names ("this machine" for this one) and what changed. The list has to
       scroll for this check (save and quit a game a couple more times if it doesn't): every row
       still shows both lines in full and the list scrolls with the D-pad. The **Show
       versions that changed** dropdown and the save toggles work with the controller.
-- [ ] G2. **B** goes back one screen at a time (confirm → version → list → closed), never straight out.
+- [ ] G2. **B** goes back one screen at a time (confirm → version → list → Save groups → closed), never straight out.
 - [ ] G3. Restore one RetroArch save from an older version: the confirm screen says what happens, a
       toast appears, the save on this machine is the old one, and Bazzite gets it on its next sync.
       `memcard trash list` shows the replaced copy.
 - [ ] G4. Press **B** on the "Restoring…" screen: the restore still finishes and its toast appears,
-      and opening Versions again meanwhile shows Restore greyed out until it's done.
-- [ ] G5. While a game runs, Versions still opens, but **Restore** is greyed out with "You can
+      and opening **Cloud versions** again meanwhile shows Restore greyed out until it's done.
+- [ ] G5. While a game runs, **Cloud versions** still opens, but **Restore** is greyed out with "You can
       restore after you quit the game".
 - [ ] G6. If you use Dolphin (restored whole): a long file list on the version screen scrolls with
       the D-pad.
 - [ ] G7. A restore that meets a conflict. On the Deck, turn off **Sync around games**, then play a
       game, save in-game and quit. On Bazzite, play the same game, save in-game and quit. Back on the
-      Deck, turn **Sync around games** on again and restore that group from Versions: the conflict
+      Deck, turn **Sync around games** on again and restore that group from **Cloud versions**: the conflict
       prompt appears on top of Cloud versions, and after choosing, the restore goes ahead.

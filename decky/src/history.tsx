@@ -29,7 +29,7 @@ import type { GroupInfo, HistoryData, HistoryVersion, MemcardError, RestoreData 
 // Same as the conflict prompt: let two-line buttons wrap instead of overflowing.
 // flexShrink 0: the list is a height-capped flex column, so without it rows shrink to fit
 // (clipping their second line) instead of the list scrolling.
-const ROW = {
+export const ROW = {
   width: "100%",
   minWidth: 0,
   height: "auto",

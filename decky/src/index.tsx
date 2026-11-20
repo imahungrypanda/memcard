@@ -10,7 +10,7 @@ import {
   staticClasses,
   ToggleField,
 } from "@decky/ui";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FaSdCard } from "react-icons/fa";
 import {
   cachedGroups,
@@ -25,6 +25,8 @@ import {
 } from "./backend";
 import { askResolutions } from "./conflicts";
 import { errorDetail, errorText, statusError } from "./errorText";
+import { showGroups } from "./groups";
+import { groupsSummary } from "./groupsText";
 import { isRestoring, showHistory } from "./history";
 import { blockedReason } from "./historyText";
 import { controller, registerLaunchHooks } from "./launch";
@@ -36,14 +38,6 @@ import type { GroupPlan, GroupsData, MemcardError, SyncData } from "./types";
 
 function toast(body: string, title = "Memcard") {
   toaster.toast({ title, body, duration: 4000 });
-}
-
-function summary(plan: GroupPlan | undefined): string {
-  if (!plan) return "";
-  if (plan.error) return `✗ ${plan.error.message}`;
-  const s = plan.summary;
-  const parts = [s.push && `${s.push} to upload`, s.pull && `${s.pull} to download`, s.conflict && `${s.conflict} conflict(s)`].filter(Boolean);
-  return parts.length ? parts.join(", ") : "✓ up to date";
 }
 
 /** Sync, then ask about any conflicts and apply the answers. Used by "Sync now" and "Resolve conflicts". */
@@ -83,6 +77,8 @@ function Content() {
   const [settings, setSettings] = useState<Settings>(currentSettings());
   const [plans, setPlans] = useState<Record<string, GroupPlan>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const busyRef = useRef(busy); // read live by Cloud versions, which outlives this render
+  busyRef.current = busy;
   const [error, setError] = useState<MemcardError | null>(null);
   const [playing, setPlaying] = useState(controller.isRunning());
   const [upd, setUpd] = useState(updateState());
@@ -224,29 +220,26 @@ function Content() {
       </PanelSection>
 
       <PanelSection title="Save groups">
-        {(groups?.groups ?? []).map((g) => (
-          <PanelSectionRow key={g.id}>
+        {groups && groups.groups.length > 0 && (
+          <PanelSectionRow>
             <ButtonItem
-              layout="inline"
-              label={g.label || g.id}
-              description={
-                (plans[g.id] ? summary(plans[g.id]) + " · " : "") +
-                (g.appids.length ? `${g.appids.length} game(s) mapped` : "manual sync only")
-              }
-              disabled={!groups?.remote}
+              layout="below"
+              description={groupsSummary(groups.groups, plans, !!groups.remote)}
               onClick={() =>
-                showHistory(
-                  g,
-                  groups?.machine ?? { id: "", name: "this machine" },
-                  () => blockedReason(controller.isRunning(), controller.isBusy() || !!busy || isRestoring(), g.id in (cachedGroups()?.pending ?? {}), g.label || g.id),
-                  () => refreshGroups(),
+                showGroups(groups.groups, plans, !!groups.remote, (g) =>
+                  showHistory(
+                    g,
+                    groups.machine,
+                    () => blockedReason(controller.isRunning(), controller.isBusy() || !!busyRef.current || isRestoring(), g.id in (cachedGroups()?.pending ?? {}), g.label || g.id),
+                    () => refreshGroups(),
+                  ),
                 )
               }
             >
-              Versions
+              Cloud versions
             </ButtonItem>
           </PanelSectionRow>
-        ))}
+        )}
         {groups && groups.groups.length === 0 && (
           <PanelSectionRow>
             <Field description="No save groups yet. Find your EmuDeck saves below." />
